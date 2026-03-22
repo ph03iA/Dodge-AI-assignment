@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ingest": "node scripts/ingest.js"
   },
   "dependencies": {
     "@google/genai": "^1.46.0",
     "@neondatabase/serverless": "^1.0.2",
+    "dotenv": "^17.3.1",
     "next": "16.2.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
