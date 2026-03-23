@@ -61,6 +61,7 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [expandStatus, setExpandStatus] = useState(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef(null);
   const fgRef = useRef(null);
@@ -134,9 +135,14 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
 
   // Expand node — fetch neighbors and merge
   const expandNode = useCallback(async (nodeId) => {
+    setExpandStatus('loading');
     try {
       const res = await fetch(`/api/node/${encodeURIComponent(nodeId)}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        setExpandStatus('error');
+        setTimeout(() => setExpandStatus(null), 2000);
+        return;
+      }
       const expansion = await res.json();
       const { nodes: expNodes = [], links: expLinks = [] } = expansion;
 
@@ -150,6 +156,15 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
           const key = `${l.source}→${l.target}`;
           return !existingLinks.has(key);
         });
+        
+        if (newNodes.length === 0) {
+          setExpandStatus('no-new');
+          setTimeout(() => setExpandStatus(null), 2000);
+        } else {
+          setExpandStatus(`added ${newNodes.length} nodes`);
+          setTimeout(() => setExpandStatus(null), 2000);
+        }
+        
         return {
           nodes: [...prev.nodes, ...newNodes],
           links: [...prev.links, ...newLinks],
@@ -157,6 +172,8 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
       });
     } catch (err) {
       console.error('Expand error:', err);
+      setExpandStatus('error');
+      setTimeout(() => setExpandStatus(null), 2000);
     }
   }, []);
 
@@ -206,6 +223,13 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
       ctx.fillStyle = '#334155';
       ctx.fillText(node.label, node.x, node.y + size + 2);
     }
+  }, [highlightSet, selected]);
+
+  // Node size for collision/hit detection (must match visual size)
+  const nodeVal = useCallback((node) => {
+    const isHighlighted = highlightSet.has(node.id);
+    const isSelected = selected?.id === node.id;
+    return isHighlighted || isSelected ? 4.5 : 3;
   }, [highlightSet, selected]);
 
   if (loading) {
@@ -258,7 +282,7 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
         graphData={graphData}
         backgroundColor="oklch(0.94 0.02 230)"
         nodeCanvasObject={nodeCanvasObject}
-        nodeRelSize={5}
+        nodeVal={nodeVal}
         linkColor={() => 'rgba(51, 65, 85, 0.22)'}
         linkDirectionalArrowLength={0}
         linkWidth={0.5}
@@ -301,8 +325,8 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
                 </div>
               ))}
           </div>
-          <button type="button" className="expand-btn" onClick={() => expandNode(selected.id)}>
-            Expand Neighbors
+          <button type="button" className="expand-btn" onClick={() => expandNode(selected.id)} disabled={expandStatus === 'loading'}>
+            {expandStatus === 'loading' ? 'Expanding...' : expandStatus === 'no-new' ? 'Already loaded' : expandStatus === 'error' ? 'Error' : expandStatus ? expandStatus : 'Expand Neighbors'}
           </button>
         </div>
       )}

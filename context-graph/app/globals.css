@@ -317,6 +317,8 @@ html, body {
 .graph-container canvas {
   position: relative;
   z-index: 1;
+  touch-action: none;
+  pointer-events: auto;
 }
 
 .graph-setup-hint {
