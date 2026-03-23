@@ -1,0 +1,20 @@
+/** Shared node palette — saturated for light graph canvas (kept out of graphBuilder to avoid client importing DB). */
+export const NODE_COLORS = {
+  customer:         '#4338ca',
+  sales_order:      '#b45309',
+  sales_order_item: '#a16207',
+  delivery:         '#047857',
+  delivery_item:    '#0d9488',
+  billing:          '#b91c1c',
+  billing_item:     '#dc2626',
+  journal_entry:    '#6d28d9',
+  payment:          '#0f766e',
+  product:          '#a21caf',
+  address:          '#57534e',
+  plant:            '#3f6212',
+  company:          '#0369a1',
+  sales_area:       '#7c3aed',
+  schedule_line:    '#c2410c',
+  billing_cancellation: '#9f1239',
+  storage_location: '#4d7c0f',
+};
