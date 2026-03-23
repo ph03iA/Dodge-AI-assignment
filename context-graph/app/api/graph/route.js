@@ -24,16 +24,19 @@ export async function GET(request) {
             data.deliveryItems = await sql`SELECT * FROM delivery_items WHERE reference_sd_document = ${seed}`;
             const dIds = [...new Set(data.deliveryItems.map(di => di.delivery_document))];
             if (dIds.length) data.deliveries = await sql`SELECT * FROM deliveries WHERE delivery_document = ANY(${dIds})`;
-            data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ${seed}`;
-            const bIds = [...new Set(data.billingItems.map(bi => bi.billing_document))];
-            if (bIds.length) {
-              data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${bIds})`;
-              if (depth >= 2) {
-                for (const bd of data.billingDocuments) {
-                  if (bd.accounting_document) {
-                    const jes = await sql`SELECT * FROM journal_entries WHERE company_code = ${bd.company_code} AND fiscal_year = ${bd.fiscal_year} AND accounting_document = ${bd.accounting_document}`;
-                    data.journalEntries = [...(data.journalEntries || []), ...jes];
-                  }
+            // billing_items.reference_sd_document points to delivery, not SO - need to use delivery IDs
+            if (dIds.length) {
+              data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ANY(${dIds})`;
+              const bIds = [...new Set(data.billingItems.map(bi => bi.billing_document))];
+              if (bIds.length) {
+                data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${bIds})`;
+              }
+            }
+            if (depth >= 2) {
+              for (const bd of data.billingDocuments) {
+                if (bd.accounting_document) {
+                  const jes = await sql`SELECT * FROM journal_entries WHERE company_code = ${bd.company_code} AND fiscal_year = ${bd.fiscal_year} AND accounting_document = ${bd.accounting_document}`;
+                  data.journalEntries = [...(data.journalEntries || []), ...jes];
                 }
               }
             }
@@ -91,17 +94,24 @@ export async function GET(request) {
           return NextResponse.json({ error: `Unknown seed type: ${seedType}` }, { status: 400 });
       }
     } else {
-      // Strategy C: light initial payload — sample of diverse nodes
-      data.customers = await sql`SELECT * FROM customers LIMIT 8`;
-      data.salesOrders = await sql`SELECT * FROM sales_orders LIMIT 15`;
-      data.salesOrderItems = await sql`SELECT soi.* FROM sales_order_items soi INNER JOIN (SELECT sales_order FROM sales_orders LIMIT 15) so ON soi.sales_order = so.sales_order`;
-      data.deliveries = await sql`SELECT DISTINCT d.* FROM deliveries d INNER JOIN delivery_items di ON d.delivery_document = di.delivery_document INNER JOIN (SELECT sales_order FROM sales_orders LIMIT 15) so ON di.reference_sd_document = so.sales_order`;
-      data.deliveryItems = await sql`SELECT di.* FROM delivery_items di INNER JOIN (SELECT sales_order FROM sales_orders LIMIT 15) so ON di.reference_sd_document = so.sales_order`;
-      data.billingDocuments = await sql`SELECT DISTINCT bd.* FROM billing_documents bd INNER JOIN billing_document_items bdi ON bd.billing_document = bdi.billing_document INNER JOIN (SELECT sales_order FROM sales_orders LIMIT 15) so ON bdi.reference_sd_document = so.sales_order`;
-      data.billingItems = await sql`SELECT bdi.* FROM billing_document_items bdi INNER JOIN (SELECT sales_order FROM sales_orders LIMIT 15) so ON bdi.reference_sd_document = so.sales_order`;
-      data.salesOrderScheduleLines = await sql`
-        SELECT sol.* FROM sales_order_schedule_lines sol
-        INNER JOIN (SELECT sales_order FROM sales_orders LIMIT 15) so ON sol.sales_order = so.sales_order`;
+      // Optimized: Load sample of entities for fast initial render, expand on demand
+      data.customers = await sql`SELECT * FROM customers`;
+      data.salesOrders = await sql`SELECT * FROM sales_orders`;
+      data.salesOrderItems = await sql`SELECT soi.* FROM sales_order_items soi INNER JOIN sales_orders so ON soi.sales_order = so.sales_order`;
+      data.deliveries = await sql`SELECT DISTINCT d.* FROM deliveries d INNER JOIN delivery_items di ON d.delivery_document = di.delivery_document`;
+      data.deliveryItems = await sql`SELECT di.* FROM delivery_items di`;
+      const deliveryIds = [...new Set((data.deliveryItems || []).map(di => di.delivery_document).filter(Boolean))];
+      if (deliveryIds.length > 0) {
+        data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ANY(${deliveryIds})`;
+        const billingIds = [...new Set((data.billingItems || []).map(bi => bi.billing_document).filter(Boolean))];
+        if (billingIds.length > 0) {
+          data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${billingIds})`;
+        }
+      } else {
+        data.billingItems = [];
+        data.billingDocuments = [];
+      }
+      data.salesOrderScheduleLines = await sql`SELECT sol.* FROM sales_order_schedule_lines sol`;
       const custIds = [...new Set(data.customers.map((c) => c.business_partner).filter(Boolean))];
       if (custIds.length) {
         data.customerCompanyAssignments =
@@ -109,8 +119,8 @@ export async function GET(request) {
         data.customerSalesAreaAssignments =
           await sql`SELECT * FROM customer_sales_area_assignments WHERE customer = ANY(${custIds})`;
       }
-      data.billingDocumentCancellations = await sql`SELECT * FROM billing_document_cancellations LIMIT 20`;
-      data.plants = await sql`SELECT * FROM plants LIMIT 20`;
+      data.billingDocumentCancellations = await sql`SELECT * FROM billing_document_cancellations`;
+      data.plants = await sql`SELECT * FROM plants`;
       const mats = [...new Set(data.salesOrderItems.map((i) => i.material).filter(Boolean))];
       if (mats.length) {
         data.products = await sql`SELECT p.*, pd.description FROM products p LEFT JOIN product_descriptions pd ON p.product = pd.product AND pd.language = 'EN' WHERE p.product = ANY(${mats})`;
@@ -118,6 +128,13 @@ export async function GET(request) {
         data.productStorageLocations =
           await sql`SELECT * FROM product_storage_locations WHERE product = ANY(${mats}) LIMIT ${OVERVIEW_MAX_PRODUCT_STORAGE_LOCS}`;
       }
+      // Load journal entries linked to billing docs (sample first 50)
+      if (data.billingDocuments && data.billingDocuments.length > 0) {
+        const bdIds = data.billingDocuments.map(bd => bd.billing_document);
+        data.journalEntries = await sql`SELECT * FROM journal_entries WHERE reference_document = ANY(${bdIds}) LIMIT 50`;
+      }
+      // Load payments (sample first 50)
+      data.payments = await sql`SELECT * FROM payments LIMIT 50`;
     }
 
     const graph = buildGraph(data);

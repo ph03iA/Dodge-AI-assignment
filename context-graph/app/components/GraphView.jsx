@@ -265,14 +265,17 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
           ctx.fill();
         }}
         linkColor={() => 'rgba(51, 65, 85, 0.22)'}
-        linkDirectionalArrowLength={3}
-        linkDirectionalArrowRelPos={1}
-        linkWidth={1}
+        linkDirectionalArrowLength={0}
+        linkWidth={0.5}
         onNodeClick={handleNodeClick}
         onNodeRightClick={handleNodeRightClick}
-        cooldownTicks={100}
-        d3AlphaDecay={0.02}
-        d3VelocityDecay={0.3}
+        cooldownTicks={50}
+        d3AlphaDecay={0.05}
+        d3VelocityDecay={0.4}
+        maxSpeed={10}
+        enableNodeDrag={true}
+        enableZoomInteraction={true}
+        enablePanInteraction={true}
       />
 
       {/* Selected node panel */}

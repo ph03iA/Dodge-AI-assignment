@@ -4,6 +4,19 @@ import { NEIGHBOR_MAX_PRODUCT_STORAGE_LOCS } from './graphLimits.js';
 
 export { NODE_COLORS };
 
+// Convert snake_case keys to camelCase and flatten top-level row data for node metadata
+function rowToMeta(row) {
+  if (!row || typeof row !== 'object') return {};
+  const meta = {};
+  for (const [key, val] of Object.entries(row)) {
+    if (key === 'id' || key === 'type' || key === 'label' || key === 'color') continue;
+    // Convert snake_case to camelCase
+    const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    meta[camelKey] = val;
+  }
+  return meta;
+}
+
 // ── Build graph from structured row bundles ────────────────────
 export function buildGraph(data) {
   const nodeMap = new Map();
@@ -16,7 +29,7 @@ export function buildGraph(data) {
       type,
       label,
       color: NODE_COLORS[type] || '#9ca3af',
-      ...metadata,
+      ...rowToMeta(metadata),
     });
   }
 
@@ -41,7 +54,7 @@ export function buildGraph(data) {
         `customer:${c.business_partner}`,
         'customer',
         c.name || c.full_name || c.business_partner,
-        { businessPartner: c.business_partner, fullName: c.full_name, city: c.city }
+        c
       );
     }
   }
@@ -53,7 +66,7 @@ export function buildGraph(data) {
         `address:${a.business_partner}:${a.address_id}`,
         'address',
         `${a.city || 'Address'} (${a.country || '?'})`,
-        { city: a.city, country: a.country, street: a.street, postalCode: a.postal_code }
+        a
       );
       addLink(`customer:${a.business_partner}`, `address:${a.business_partner}:${a.address_id}`, 'has_address');
     }
@@ -61,10 +74,7 @@ export function buildGraph(data) {
 
   if (data.customerCompanyAssignments) {
     for (const row of data.customerCompanyAssignments) {
-      addNode(`company:${row.company_code}`, 'company', `Co ${row.company_code}`, {
-        companyCode: row.company_code,
-        reconciliationAccount: row.reconciliation_account,
-      });
+      addNode(`company:${row.company_code}`, 'company', `Co ${row.company_code}`, row);
       addLink(`customer:${row.customer}`, `company:${row.company_code}`, 'assigned_company');
     }
   }
@@ -72,11 +82,7 @@ export function buildGraph(data) {
   if (data.customerSalesAreaAssignments) {
     for (const row of data.customerSalesAreaAssignments) {
       const saId = `sales_area:${row.customer}:${row.sales_organization}:${row.distribution_channel}:${row.division}`;
-      addNode(saId, 'sales_area', `SA ${row.sales_organization}/${row.distribution_channel}`, {
-        currency: row.currency,
-        incoterms: row.incoterms,
-        division: row.division,
-      });
+      addNode(saId, 'sales_area', `SA ${row.sales_organization}/${row.distribution_channel}`, row);
       addLink(`customer:${row.customer}`, saId, 'sold_in_area');
     }
   }
@@ -88,7 +94,7 @@ export function buildGraph(data) {
         `product:${p.product}`,
         'product',
         p.description || p.product,
-        { productGroup: p.product_group, baseUnit: p.base_unit, weight: p.gross_weight }
+        p
       );
     }
   }
@@ -99,7 +105,7 @@ export function buildGraph(data) {
         `plant:${pl.plant}`,
         'plant',
         pl.plant_name || pl.plant,
-        { plant: pl.plant, salesOrganization: pl.sales_organization, distributionChannel: pl.distribution_channel }
+        pl
       );
     }
   }
@@ -111,7 +117,7 @@ export function buildGraph(data) {
         `sales_order:${so.sales_order}`,
         'sales_order',
         `SO ${so.sales_order}`,
-        { totalNetAmount: so.total_net_amount, currency: so.transaction_currency, status: so.overall_delivery_status, date: so.creation_date }
+        so
       );
       addLink(`customer:${so.sold_to_party}`, `sales_order:${so.sales_order}`, 'placed_order');
     }
@@ -124,7 +130,7 @@ export function buildGraph(data) {
         `sales_order_item:${soi.sales_order}:${soi.sales_order_item}`,
         'sales_order_item',
         `SOI ${soi.sales_order}/${soi.sales_order_item}`,
-        { material: soi.material, quantity: soi.requested_quantity, netAmount: soi.net_amount }
+        soi
       );
       addLink(`sales_order:${soi.sales_order}`, `sales_order_item:${soi.sales_order}:${soi.sales_order_item}`, 'has_item');
       if (soi.material) {
@@ -136,11 +142,7 @@ export function buildGraph(data) {
   if (data.salesOrderScheduleLines) {
     for (const sl of data.salesOrderScheduleLines) {
       const slId = `schedule_line:${sl.sales_order}:${sl.sales_order_item}:${sl.schedule_line}`;
-      addNode(slId, 'schedule_line', `Sch ${sl.sales_order}/${sl.sales_order_item}/${sl.schedule_line}`, {
-        confirmedDeliveryDate: sl.confirmed_delivery_date,
-        confirmedQty: sl.confirmed_order_qty,
-        unit: sl.order_quantity_unit,
-      });
+      addNode(slId, 'schedule_line', `Sch ${sl.sales_order}/${sl.sales_order_item}/${sl.schedule_line}`, sl);
       addLink(
         `sales_order_item:${sl.sales_order}:${sl.sales_order_item}`,
         slId,
@@ -156,7 +158,7 @@ export function buildGraph(data) {
         `delivery:${d.delivery_document}`,
         'delivery',
         `DLV ${d.delivery_document}`,
-        { shippingPoint: d.shipping_point, goodsMovementStatus: d.goods_movement_status, date: d.creation_date }
+        d
       );
     }
   }
@@ -168,7 +170,7 @@ export function buildGraph(data) {
         `delivery_item:${di.delivery_document}:${di.delivery_document_item}`,
         'delivery_item',
         `DLI ${di.delivery_document}/${di.delivery_document_item}`,
-        { quantity: di.actual_delivery_quantity, plant: di.plant }
+        di
       );
       addLink(`delivery:${di.delivery_document}`, `delivery_item:${di.delivery_document}:${di.delivery_document_item}`, 'has_item');
       if (di.reference_sd_document) {
@@ -188,7 +190,7 @@ export function buildGraph(data) {
         `billing:${bd.billing_document}`,
         'billing',
         `BILL ${bd.billing_document}`,
-        { totalNetAmount: bd.total_net_amount, currency: bd.transaction_currency, date: bd.creation_date, isCancelled: bd.is_cancelled }
+        bd
       );
       if (bd.sold_to_party) {
         addLink(`customer:${bd.sold_to_party}`, `billing:${bd.billing_document}`, 'billed_to');
@@ -203,7 +205,7 @@ export function buildGraph(data) {
         `billing_item:${bi.billing_document}:${bi.billing_document_item}`,
         'billing_item',
         `BLI ${bi.billing_document}/${bi.billing_document_item}`,
-        { material: bi.material, quantity: bi.billing_quantity, netAmount: bi.net_amount }
+        bi
       );
       addLink(`billing:${bi.billing_document}`, `billing_item:${bi.billing_document}:${bi.billing_document_item}`, 'has_item');
       if (bi.reference_sd_document) {
@@ -218,11 +220,7 @@ export function buildGraph(data) {
   if (data.billingDocumentCancellations) {
     for (const bc of data.billingDocumentCancellations) {
       const cid = `billing_cancel:${bc.billing_document}`;
-      addNode(cid, 'billing_cancellation', `Cancel ${bc.billing_document}`, {
-        totalNetAmount: bc.total_net_amount,
-        currency: bc.transaction_currency,
-        billingDate: bc.billing_date,
-      });
+      addNode(cid, 'billing_cancellation', `Cancel ${bc.billing_document}`, bc);
       if (bc.sold_to_party) {
         addLink(`customer:${bc.sold_to_party}`, cid, 'cancellation_for');
       }
@@ -243,11 +241,7 @@ export function buildGraph(data) {
     for (const ps of data.productStorageLocations) {
       ensurePlant(ps.plant);
       const sid = `storage_loc:${ps.product}:${ps.plant}:${ps.storage_location}`;
-      addNode(sid, 'storage_location', `Bin ${ps.storage_location}`, {
-        product: ps.product,
-        plant: ps.plant,
-        storageLocation: ps.storage_location,
-      });
+      addNode(sid, 'storage_location', `Bin ${ps.storage_location}`, ps);
       addLink(`product:${ps.product}`, sid, 'in_bin');
       addLink(`plant:${ps.plant}`, sid, 'has_bin');
     }
@@ -261,7 +255,7 @@ export function buildGraph(data) {
         jeId,
         'journal_entry',
         `JE ${je.accounting_document}/${je.accounting_document_item}`,
-        { amount: je.amount_in_trans_currency, currency: je.transaction_currency, postingDate: je.posting_date, glAccount: je.gl_account }
+        je
       );
       if (je.customer) {
         addLink(jeId, `customer:${je.customer}`, 'for_customer');
@@ -277,7 +271,7 @@ export function buildGraph(data) {
         payId,
         'payment',
         `PAY ${p.accounting_document}/${p.accounting_document_item}`,
-        { amount: p.amount_in_trans_currency, currency: p.transaction_currency, postingDate: p.posting_date }
+        p
       );
       if (p.customer) {
         addLink(payId, `customer:${p.customer}`, 'paid_by');
@@ -337,11 +331,13 @@ export async function getNodeNeighbors(id, type) {
         if (deliveryIds.length > 0) {
           data.deliveries = await sql`SELECT * FROM deliveries WHERE delivery_document = ANY(${deliveryIds})`;
         }
-        // Get billing linked through billing items
-        data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ${id}`;
-        const billingIds = [...new Set(data.billingItems.map(bi => bi.billing_document))];
-        if (billingIds.length > 0) {
-          data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${billingIds})`;
+        // Get billing linked through delivery (billing items reference delivery docs, not SO directly)
+        if (deliveryIds.length > 0) {
+          data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ANY(${deliveryIds})`;
+          const billingIds = [...new Set(data.billingItems.map(bi => bi.billing_document))];
+          if (billingIds.length > 0) {
+            data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${billingIds})`;
+          }
         }
         // Get products
         const materials = [...new Set(data.salesOrderItems.map(i => i.material).filter(Boolean))];
