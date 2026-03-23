@@ -4,15 +4,33 @@ const path = require('path');
 
 // ── Config ─────────────────────────────────────────────────────
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env.local') });
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
+function resolveDataDir() {
+  if (process.env.O2C_DATA_DIR && String(process.env.O2C_DATA_DIR).trim()) {
+    const raw = String(process.env.O2C_DATA_DIR).trim();
+    return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+  }
+  const inApp = path.resolve(__dirname, '..', 'data', 'sap-o2c-data');
+  const legacy = path.resolve(__dirname, '..', '..', 'sap-order-to-cash-dataset', 'sap-o2c-data');
+  if (fs.existsSync(inApp)) return inApp;
+  return legacy;
+}
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
-  console.error('DATABASE_URL not set in .env.local');
+  console.error('DATABASE_URL is not set. Add it to .env.local or your host (e.g. Vercel → Environment Variables).');
   process.exit(1);
 }
 
 const sql = neon(DATABASE_URL);
-const DATA_DIR = path.resolve(__dirname, '..', '..', 'sap-order-to-cash-dataset', 'sap-o2c-data');
+const DATA_DIR = resolveDataDir();
+
+if (!fs.existsSync(DATA_DIR)) {
+  console.error('O2C data folder not found:', DATA_DIR);
+  console.error('Options: copy sap-o2c-data → context-graph/data/sap-o2c-data, or set O2C_DATA_DIR, or keep dataset at ../../sap-order-to-cash-dataset/sap-o2c-data');
+  process.exit(1);
+}
 
 // ── Helpers ────────────────────────────────────────────────────
 

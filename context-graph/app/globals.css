@@ -310,6 +310,13 @@ html, body {
   width: 100%;
   height: 100%;
   position: relative;
+  isolation: isolate;
+}
+
+/* Keep canvas under overlays (some browsers stack canvas above siblings otherwise). */
+.graph-container canvas {
+  position: relative;
+  z-index: 1;
 }
 
 .graph-setup-hint {
@@ -393,7 +400,7 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 14px;
-  z-index: 10;
+  z-index: 20;
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
@@ -436,7 +443,8 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 16px;
-  z-index: 10;
+  z-index: 40;
+  pointer-events: auto;
   box-shadow: 0 8px 24px oklch(0.2 0.04 260 / 0.08);
   animation: panel-rise 0.34s var(--ease-out-quart) both;
 }
@@ -496,6 +504,14 @@ html, body {
   font-size: 0.75rem;
   padding: 3px 0;
   border-bottom: 1px solid var(--border);
+}
+
+.meta-value--mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.68rem;
+  word-break: break-all;
+  text-align: right;
+  max-width: 65%;
 }
 
 .meta-key {

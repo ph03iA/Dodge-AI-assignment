@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build",
+    "vercel-build": "node scripts/ci-ingest.js && next build",
     "start": "next start",
     "lint": "eslint",
     "ingest": "node scripts/ingest.js"

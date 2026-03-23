@@ -6,6 +6,31 @@ import { NODE_COLORS } from '@/lib/nodeColors';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
 
+/** Shallow copy so the panel isn’t tied to force-graph’s mutated node refs (fixes missing fields in some builds). */
+function snapshotNode(node) {
+  if (!node || typeof node !== 'object') return node;
+  return { ...node };
+}
+
+function formatMetaValue(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'bigint') return v.toString();
+  if (typeof v === 'object') {
+    if (v instanceof Date) return v.toISOString();
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return String(v);
+}
+
+const PANEL_SKIP_KEYS = new Set([
+  'id', 'type', 'label', 'color', 'x', 'y', 'vx', 'vy', 'fx', 'fy', 'index',
+  '__indexColor', '__threeObj',
+]);
+
 const TYPE_LABELS = {
   customer: 'Customer',
   sales_order: 'Sales Order',
@@ -140,8 +165,9 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
   );
 
   const handleNodeClick = useCallback((node) => {
-    setSelected(node);
-    if (onNodeSelect) onNodeSelect(node);
+    const snap = snapshotNode(node);
+    setSelected(snap);
+    if (onNodeSelect) onNodeSelect(snap);
   }, [onNodeSelect]);
 
   const handleNodeRightClick = useCallback((node, event) => {
@@ -256,12 +282,20 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
           </div>
           <h3 className="node-panel-title">{selected.label}</h3>
           <div className="node-panel-meta">
+            <div className="meta-row">
+              <span className="meta-key">id</span>
+              <span className="meta-value meta-value--mono">{formatMetaValue(selected.id)}</span>
+            </div>
+            <div className="meta-row">
+              <span className="meta-key">type</span>
+              <span className="meta-value">{formatMetaValue(selected.type)}</span>
+            </div>
             {Object.entries(selected)
-              .filter(([k]) => !['id', 'type', 'label', 'color', 'x', 'y', 'vx', 'vy', 'fx', 'fy', 'index', '__indexColor'].includes(k))
+              .filter(([k]) => !PANEL_SKIP_KEYS.has(k))
               .map(([k, v]) => (
                 <div key={k} className="meta-row">
                   <span className="meta-key">{k}</span>
-                  <span className="meta-value">{String(v ?? '—')}</span>
+                  <span className="meta-value">{formatMetaValue(v)}</span>
                 </div>
               ))}
           </div>
