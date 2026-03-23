@@ -92,7 +92,8 @@ async function batchUpsert(tableName, columns, jsonKeys, conflictKeys, rows) {
 
     const query = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES ${values.join(', ')} ${conflictClause}`;
 
-    await sql(query, params);
+    // Neon serverless: use sql.query() for parameterized queries
+    await sql.query(query, params);
     inserted += batch.length;
   }
   return inserted;
@@ -320,22 +321,190 @@ async function ingestPayments() {
     ['company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item'], rows);
 }
 
+async function ingestBillingDocumentCancellations() {
+  const rows = readJSONLParts('billing_document_cancellations');
+  const columns = [
+    'billing_document', 'billing_type', 'creation_date', 'creation_time',
+    'last_change_datetime', 'billing_date', 'billing_is_cancelled', 'cancelled_billing_doc',
+    'total_net_amount', 'transaction_currency', 'company_code', 'fiscal_year',
+    'accounting_document', 'sold_to_party',
+  ];
+  const jsonKeys = [
+    'billingDocument', 'billingDocumentType', 'creationDate', 'creationTime',
+    'lastChangeDateTime', 'billingDocumentDate', 'billingDocumentIsCancelled',
+    'cancelledBillingDocument', 'totalNetAmount', 'transactionCurrency',
+    'companyCode', 'fiscalYear', 'accountingDocument', 'soldToParty',
+  ];
+  return batchUpsert('billing_document_cancellations', columns, jsonKeys, ['billing_document'], rows);
+}
+
+async function ingestCustomerCompanyAssignments() {
+  const rows = readJSONLParts('customer_company_assignments');
+  const columns = [
+    'customer', 'company_code', 'accounting_clerk', 'accounting_clerk_fax',
+    'accounting_clerk_email', 'accounting_clerk_phone', 'alternative_payer_account',
+    'payment_blocking_reason', 'payment_methods_list', 'payment_terms',
+    'reconciliation_account', 'deletion_indicator', 'customer_account_group',
+  ];
+  const jsonKeys = [
+    'customer', 'companyCode', 'accountingClerk', 'accountingClerkFaxNumber',
+    'accountingClerkInternetAddress', 'accountingClerkPhoneNumber', 'alternativePayerAccount',
+    'paymentBlockingReason', 'paymentMethodsList', 'paymentTerms',
+    'reconciliationAccount', 'deletionIndicator', 'customerAccountGroup',
+  ];
+  return batchUpsert('customer_company_assignments', columns, jsonKeys, ['customer', 'company_code'], rows);
+}
+
+async function ingestCustomerSalesAreaAssignments() {
+  const rows = readJSONLParts('customer_sales_area_assignments');
+  const columns = [
+    'customer', 'sales_organization', 'distribution_channel', 'division',
+    'billing_blocked', 'complete_delivery_defined', 'credit_control_area', 'currency',
+    'customer_payment_terms', 'delivery_priority', 'incoterms', 'incoterms_location',
+    'sales_group', 'sales_office', 'shipping_condition', 'sls_unlimited_overdelivery',
+    'supplying_plant', 'sales_district', 'exchange_rate_type',
+  ];
+  const jsonKeys = [
+    'customer', 'salesOrganization', 'distributionChannel', 'division',
+    'billingIsBlockedForCustomer', 'completeDeliveryIsDefined', 'creditControlArea', 'currency',
+    'customerPaymentTerms', 'deliveryPriority', 'incotermsClassification', 'incotermsLocation1',
+    'salesGroup', 'salesOffice', 'shippingCondition', 'slsUnlmtdOvrdelivIsAllwd',
+    'supplyingPlant', 'salesDistrict', 'exchangeRateType',
+  ];
+  return batchUpsert(
+    'customer_sales_area_assignments',
+    columns,
+    jsonKeys,
+    ['customer', 'sales_organization', 'distribution_channel', 'division'],
+    rows
+  );
+}
+
+async function ingestSalesOrderScheduleLines() {
+  const rows = readJSONLParts('sales_order_schedule_lines');
+  const columns = [
+    'sales_order', 'sales_order_item', 'schedule_line',
+    'confirmed_delivery_date', 'order_quantity_unit', 'confirmed_order_qty',
+  ];
+  const jsonKeys = [
+    'salesOrder', 'salesOrderItem', 'scheduleLine',
+    'confirmedDeliveryDate', 'orderQuantityUnit', 'confdOrderQtyByMatlAvailCheck',
+  ];
+  return batchUpsert(
+    'sales_order_schedule_lines',
+    columns,
+    jsonKeys,
+    ['sales_order', 'sales_order_item', 'schedule_line'],
+    rows
+  );
+}
+
+async function ingestProductPlants() {
+  const rows = readJSONLParts('product_plants');
+  const columns = [
+    'product', 'plant', 'country_of_origin', 'region_of_origin',
+    'production_invtry_managed_loc', 'availability_check_type', 'fiscal_year_variant',
+    'profit_center', 'mrp_type',
+  ];
+  const jsonKeys = [
+    'product', 'plant', 'countryOfOrigin', 'regionOfOrigin',
+    'productionInvtryManagedLoc', 'availabilityCheckType', 'fiscalYearVariant',
+    'profitCenter', 'mrpType',
+  ];
+  return batchUpsert('product_plants', columns, jsonKeys, ['product', 'plant'], rows);
+}
+
+async function ingestProductStorageLocations() {
+  const rows = readJSONLParts('product_storage_locations');
+  const columns = [
+    'product', 'plant', 'storage_location', 'physical_inventory_block',
+    'date_last_posted_count_unrestricted',
+  ];
+  const jsonKeys = [
+    'product', 'plant', 'storageLocation', 'physicalInventoryBlockInd',
+    'dateOfLastPostedCntUnRstrcdStk',
+  ];
+  return batchUpsert(
+    'product_storage_locations',
+    columns,
+    jsonKeys,
+    ['product', 'plant', 'storage_location'],
+    rows
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────
+
+/** Split schema.sql into executable statements (naive `;` split breaks `DO $$ ... $$;` blocks). */
+function splitSchemaStatements(sql) {
+  const statements = [];
+  let i = 0;
+
+  const skipWsAndComments = () => {
+    while (i < sql.length) {
+      if (/\s/.test(sql[i])) {
+        i++;
+        continue;
+      }
+      if (sql[i] === '-' && sql[i + 1] === '-') {
+        i += 2;
+        while (i < sql.length && sql[i] !== '\n') i++;
+        continue;
+      }
+      break;
+    }
+  };
+
+  while (i < sql.length) {
+    skipWsAndComments();
+    if (i >= sql.length) break;
+
+    const rest = sql.slice(i);
+    const doMatch = rest.match(/^\s*DO\s+\$\$/i);
+    if (doMatch) {
+      const bodyStart = i + doMatch[0].length;
+      let pos = bodyStart;
+      let close = -1;
+      while (pos < sql.length) {
+        const d = sql.indexOf('$$', pos);
+        if (d === -1) throw new Error('schema.sql: unclosed DO $$ block');
+        const after = sql.slice(d + 2).match(/^\s*;/);
+        if (after) {
+          close = d + 2 + after[0].length;
+          break;
+        }
+        pos = d + 2;
+      }
+      if (close === -1) throw new Error('schema.sql: DO $$ block has no closing $$;');
+      statements.push(sql.slice(i, close).trim());
+      i = close;
+      continue;
+    }
+
+    const semi = sql.indexOf(';', i);
+    if (semi === -1) {
+      const tail = sql.slice(i).trim();
+      if (tail) statements.push(tail);
+      break;
+    }
+    const stmt = sql.slice(i, semi).trim();
+    if (stmt) statements.push(stmt);
+    i = semi + 1;
+  }
+
+  return statements.filter(s => s.length > 0);
+}
 
 async function main() {
   console.log('Starting data ingestion...\n');
 
   // Run schema first
   const schemaSQL = fs.readFileSync(path.resolve(__dirname, '..', 'lib', 'schema.sql'), 'utf8');
-  // Split by semicolons and run each statement
-  const statements = schemaSQL
-    .split(';')
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
+  const statements = splitSchemaStatements(schemaSQL);
 
-  console.log(`📋 Running schema (${statements.length} statements)...`);
+  console.log(`Running schema (${statements.length} statements)...`);
   for (const stmt of statements) {
-    await sql(stmt);
+    await sql.query(stmt);
   }
   console.log('Schema applied\n');
 
@@ -346,14 +515,20 @@ async function main() {
     ['products', ingestProducts],
     ['product_descriptions', ingestProductDescriptions],
     ['plants', ingestPlants],
+    ['customer_company_assignments', ingestCustomerCompanyAssignments],
+    ['customer_sales_area_assignments', ingestCustomerSalesAreaAssignments],
     ['sales_orders', ingestSalesOrders],
     ['sales_order_items', ingestSalesOrderItems],
+    ['sales_order_schedule_lines', ingestSalesOrderScheduleLines],
     ['deliveries', ingestDeliveries],
     ['delivery_items', ingestDeliveryItems],
     ['billing_documents', ingestBillingDocuments],
     ['billing_document_items', ingestBillingDocumentItems],
+    ['billing_document_cancellations', ingestBillingDocumentCancellations],
     ['journal_entries', ingestJournalEntries],
     ['payments', ingestPayments],
+    ['product_plants', ingestProductPlants],
+    ['product_storage_locations', ingestProductStorageLocations],
   ];
 
   const results = {};

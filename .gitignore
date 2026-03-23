@@ -1,1 +1,10 @@
 sap-order-to-cash-dataset/
+
+# Next.js app (context-graph)
+context-graph/.next/
+context-graph/out/
+context-graph/node_modules/
+context-graph/.env
+context-graph/.env.local
+context-graph/.env.*
+!context-graph/.env.example
