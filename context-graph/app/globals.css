@@ -212,7 +212,6 @@ html, body {
   position: relative;
   overflow: hidden;
   min-height: 0;
-  contain: strict;
 }
 
 .chat-pane {
@@ -447,6 +446,18 @@ html, body {
   pointer-events: auto;
   box-shadow: 0 8px 24px oklch(0.2 0.04 260 / 0.08);
   animation: panel-rise 0.34s var(--ease-out-quart) both;
+}
+
+/* Portaled to document.body so the canvas/stacking context cannot hide the panel (Vercel / some browsers). */
+.node-panel--portal {
+  position: fixed;
+  z-index: 10000;
+  bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  left: auto;
+  top: auto;
+  margin: 0;
+  max-height: min(420px, 50dvh);
 }
 
 .node-panel-header {
