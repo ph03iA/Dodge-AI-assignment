@@ -30,7 +30,7 @@ sales_order_items (sales_order FK→sales_orders, sales_order_item, item_categor
 deliveries (delivery_document PK, actual_goods_movement_date, creation_date, goods_movement_status, picking_status, shipping_point)
 delivery_items (delivery_document FK→deliveries, delivery_document_item, actual_delivery_quantity, quantity_unit, plant, reference_sd_document ref→sales_order, reference_sd_document_item, PK(delivery_document,delivery_document_item))
 billing_documents (billing_document PK, billing_type, creation_date, billing_date, is_cancelled, total_net_amount, transaction_currency, company_code, fiscal_year, accounting_document, sold_to_party FK→customers)
-billing_document_items (billing_document FK→billing_documents, billing_document_item, material FK→products, billing_quantity, net_amount, reference_sd_document ref→sales_order, reference_sd_document_item, PK(billing_document,billing_document_item))
+billing_document_items (billing_document FK→billing_documents, billing_document_item, material FK→products, billing_quantity, net_amount, reference_sd_document FK→deliveries.delivery_document, reference_sd_document_item, PK(billing_document,billing_document_item))
 journal_entries (company_code, fiscal_year, accounting_document, accounting_document_item, gl_account, amount_in_trans_currency, transaction_currency, posting_date, document_type, customer FK→customers, clearing_date, clearing_document, PK(company_code,fiscal_year,accounting_document,accounting_document_item))
 payments (company_code, fiscal_year, accounting_document, accounting_document_item, amount_in_trans_currency, transaction_currency, customer FK→customers, invoice_reference, sales_document, posting_date, PK(company_code,fiscal_year,accounting_document,accounting_document_item))
 billing_document_cancellations (billing_document PK, billing_type, creation_date, billing_date, billing_is_cancelled, cancelled_billing_doc ref→billing_documents.billing_document, total_net_amount, transaction_currency, company_code, fiscal_year, accounting_document, sold_to_party FK→customers)
@@ -44,16 +44,18 @@ Key joins:
 - sales_orders.sold_to_party → customers.business_partner
 - sales_order_items.material → products.product
 - delivery_items.reference_sd_document → sales_orders.sales_order (links delivery to order)
-- billing_document_items.reference_sd_document → sales_orders.sales_order (links billing to order)
+- billing_document_items.reference_sd_document → deliveries.delivery_document (IMPORTANT: billing references DELIVERY doc, not sales order directly!)
 - billing_documents.(company_code,fiscal_year,accounting_document) → journal_entries.(company_code,fiscal_year,accounting_document)
 - payments.customer → customers.business_partner
 - billing_documents.sold_to_party → customers.business_partner
-- billing_document_cancellations.cancelled_billing_doc → billing_documents.billing_document; billing_document_cancellations.sold_to_party → customers.business_partner
+- billing_document_cancellations.cancelled_billing_doc → billing_documents.billing_document
 - customer_company_assignments.customer → customers.business_partner
 - customer_sales_area_assignments.customer → customers.business_partner
 - sales_order_schedule_lines.(sales_order,sales_order_item) → sales_order_items.(sales_order,sales_order_item)
 - product_plants.product → products.product; product_plants.plant → plants.plant
-- product_storage_locations.(product,plant) → product_plants optional path; storage rows reference products and plants
+- product_storage_locations.(product,plant) → product_plants optional path
+
+O2C Flow: Sales Order → Delivery (delivery_items.reference_sd_document) → Billing (billing_document_items.reference_sd_document → delivery_document)
 `.trim();
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -298,13 +300,46 @@ Rules:
 4. Do NOT wrap in markdown fences or add any commentary. Output ONLY the raw SQL.
 5. Use proper JOINs to connect related tables when needed.
 6. For product names, JOIN product_descriptions with language = 'EN'.
-7. For tracing flows: use delivery_items.reference_sd_document to link deliveries to sales orders, and billing_document_items.reference_sd_document to link billing to sales orders. Link billing to journal entries via (company_code, fiscal_year, accounting_document).
-8. Delivered but not billed (incomplete flow): sales orders that appear on at least one delivery line but have no billing line pointing to that order. Prefer NOT EXISTS: FROM delivery_items di WHERE di.reference_sd_document IS NOT NULL AND NOT EXISTS (SELECT 1 FROM billing_document_items bdi WHERE bdi.reference_sd_document = di.reference_sd_document). Return DISTINCT sales_order ids; LIMIT 50–100.
-9. Billed without delivery: sales orders referenced on billing lines but never on any delivery line for that order. NOT EXISTS (SELECT 1 FROM delivery_items di WHERE di.reference_sd_document = bdi.reference_sd_document) with FROM billing_document_items bdi WHERE bdi.reference_sd_document IS NOT NULL. DISTINCT reference_sd_document; LIMIT 50–100.
+7. For tracing flows: use delivery_items.reference_sd_document to link deliveries to sales orders. For billing: billing_document_items.reference_sd_document links to DELIVERIES (not sales orders directly). To get from billing to sales order, you must join: billing_document_items → deliveries (via reference_sd_document = delivery_document) → delivery_items → sales_orders. Or use billing_documents.sold_to_party to get customer directly.
+8. INCOMPLETE FLOWS - Delivered but not billed: Find sales orders that have deliveries but NO billing records. Since billing references deliveries, check for deliveries that have no matching billing items:
+   SELECT DISTINCT so.sales_order, so.total_net_amount, so.creation_date, COUNT(DISTINCT di.delivery_document) AS delivery_count, 'delivered_not_billed' AS status
+   FROM sales_orders so
+   INNER JOIN delivery_items di ON di.reference_sd_document = so.sales_order
+   LEFT JOIN billing_document_items bdi ON bdi.reference_sd_document = di.delivery_document
+   WHERE bdi.billing_document IS NULL
+   GROUP BY so.sales_order, so.total_net_amount, so.creation_date
+   ORDER BY so.creation_date DESC
+   LIMIT 50
+
+9. INCOMPLETE FLOWS - Billed without delivery: Find deliveries that have billing but the sales order has no delivery record. Since billing references deliveries, check for billing items whose delivery has no matching sales order:
+   SELECT DISTINCT bd.billing_document, bd.total_net_amount, bdi.reference_sd_document AS delivery_doc, 'billed_delivery_no_order' AS status
+   FROM billing_documents bd
+   INNER JOIN billing_document_items bdi ON bdi.billing_document = bd.billing_document
+   LEFT JOIN delivery_items di ON di.delivery_document = bdi.reference_sd_document AND di.reference_sd_document IS NOT NULL
+   WHERE di.delivery_document IS NULL
+   ORDER BY bd.creation_date DESC
+   LIMIT 50
 10. Use LEFT JOINs / NOT EXISTS / IS NULL for missing links; prefer NOT EXISTS when comparing existence across fact tables.
 11. CRITICAL — table aliases: Every alias (bd, bdi, di, so, je, etc.) MUST appear in FROM or JOIN. Never write WHERE bd.col = ... unless FROM billing_documents bd (or JOIN ... bd) is present in the same SELECT. If unsure, use full table names instead of aliases.
-12. Tracing one billing document through sales order → delivery → billing → journal: start FROM billing_documents, JOIN billing_document_items for reference_sd_document (= sales_order), LEFT JOIN delivery_items ON delivery_items.reference_sd_document = billing_document_items.reference_sd_document, LEFT JOIN deliveries ON deliveries.delivery_document = delivery_items.delivery_document, LEFT JOIN journal_entries ON journal_entries.company_code = billing_documents.company_code AND journal_entries.fiscal_year = billing_documents.fiscal_year AND journal_entries.accounting_document = billing_documents.accounting_document. Filter WHERE billing_documents.billing_document = '<id>'. Include billing_documents.accounting_document only if it is non-null for JE link.
+12. Tracing one billing document through its flow: billing_document_items.reference_sd_document = delivery_document (not sales order!). To get sales order, join delivery_items on delivery_document, then get sales_order from delivery_items.reference_sd_document:
+   SELECT bd.billing_document, bdi.reference_sd_document AS delivery_doc, di.reference_sd_document AS sales_order, bd.company_code, bd.fiscal_year, bd.accounting_document, je.amount_in_trans_currency
+   FROM billing_documents bd
+   INNER JOIN billing_document_items bdi ON bdi.billing_document = bd.billing_document
+   LEFT JOIN delivery_items di ON di.delivery_document = bdi.reference_sd_document
+   LEFT JOIN journal_entries je ON je.company_code = bd.company_code AND je.fiscal_year = bd.fiscal_year AND je.accounting_document = bd.accounting_document
+   WHERE bd.billing_document = '90504248'
+   LIMIT 100
 13. Products with the highest number of billing documents: use billing_document_items (material = product). COUNT(DISTINCT bdi.billing_document) GROUP BY bdi.material. JOIN products p ON p.product = bdi.material LEFT JOIN product_descriptions pd ON pd.product = bdi.material AND pd.language = 'EN'. ORDER BY count DESC LIMIT 20–50.
+14. Top customers by billing amount: JOIN billing_documents.sold_to_party → customers.business_partner. SUM(billing_documents.total_net_amount) GROUP BY customer name. ORDER BY total DESC LIMIT 10-20.
+15. Customers with uncleared payments/payments: JOIN payments with customers. Look for payments.accounting_document where clearing_date IS NULL or payments without matching journal entries. Include customer name and payment amount.
+16. Cancelled billing documents: FROM billing_document_cancellations. JOIN billing_documents on cancelled_billing_doc. Return cancellation date, original billing doc, amount, and customer.
+17. Journal entries for accounting document: FROM journal_entries WHERE company_code = X AND fiscal_year = Y AND accounting_document = Z. Include amount_in_trans_currency, gl_account, posting_date.
+18. Products with highest order quantity: FROM sales_order_items. SUM(requested_quantity) GROUP BY material. JOIN products and product_descriptions for names. ORDER BY total_quantity DESC LIMIT 20.
+19. Deliveries pending goods movement: FROM deliveries WHERE overall_goods_movement_status = 'A' (or similar pending status). Include delivery_document, creation_date, shipping_point.
+20. Customers with orders but no deliveries: FROM sales_orders so LEFT JOIN delivery_items di ON di.reference_sd_document = so.sales_order WHERE di.delivery_document IS NULL. Include customer info via so.sold_to_party → customers.
+21. Average order value by distribution channel: FROM sales_orders. AVG(total_net_amount) GROUP BY distribution_channel. ORDER BY avg DESC.
+22. Plants with most delivery activity: FROM delivery_items. COUNT(DISTINCT delivery_document) GROUP BY plant. JOIN plants for plant_name. ORDER BY count DESC LIMIT 20.
+23. Rejected sales order items: FROM sales_order_items WHERE salesDocumentRjcnReason IS NOT NULL AND salesDocumentRjcnReason != ''. Include sales_order, item, material, rejection_reason.
 
 Example trace query (output SQL only, no prose; use the billing document number from the user's message in WHERE):
 SELECT bd.billing_document, bdi.reference_sd_document AS sales_order, di.delivery_document, bd.company_code, bd.fiscal_year, bd.accounting_document, je.accounting_document_item, je.amount_in_trans_currency
@@ -370,8 +405,19 @@ Answer the user's question STRICTLY based on the provided query results.
 - Do NOT invent or assume data not present in the results.
 - If the results are empty, say so.
 - Use natural language. Be concise and clear.
-- For tabular data, present it in a readable format.
-- Keep your answer under 500 words.`,
+- ALWAYS format tabular data as markdown tables with proper headers.
+- For tables with many columns, select the most relevant 5-7 columns to display.
+- Add a brief summary BEFORE the table explaining what the data shows.
+- When explaining incomplete or broken flows:
+  * If the results include a 'status' column like 'delivered_not_billed' or 'billed_without_delivery', explain what that means in business terms.
+  * 'delivered_not_billed' = goods were shipped/delivered to customer but no invoice was created yet - revenue may be unrecognized.
+  * 'billed_without_delivery' = invoice was created but goods haven't been shipped - potential fulfillment issue.
+- Always provide context for WHY results are significant.
+- For flow tracing queries (sales order → delivery → billing → journal), show the complete chain with status at each step.
+- Format monetary values with currency symbols (₹, $, €, etc.) when available.
+- For date fields, format them in a human-readable way.
+- Add a "Key Insights" section after the table if there are meaningful patterns.
+- Keep your answer under 800 words.`,
     userContent: `User question: ${message}\n\nQuery results (JSON):\n${JSON.stringify(cappedResults, null, 2)}`,
     temperature: 0.2,
     maxOutputTokens: 2048,

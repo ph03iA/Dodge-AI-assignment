@@ -642,6 +642,8 @@ html, body {
   font-family: inherit;
   line-height: 1.45;
   cursor: pointer;
+  word-break: break-word;
+  overflow-wrap: break-word;
   transition:
     border-color var(--t-reveal) var(--ease-out-quart),
     background var(--t-reveal) var(--ease-out-quart),
@@ -713,7 +715,9 @@ html, body {
   padding: 12px 14px;
   font-size: var(--text-ui);
   line-height: var(--leading-body);
-  max-width: min(100%, var(--measure-prose));
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-wrap: break-word;
 }
 
 .message.blocked .message-content {
@@ -741,6 +745,21 @@ html, body {
   border-collapse: collapse;
   margin: 10px 0;
   font-size: 0.78rem;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.message-content thead {
+  display: table-header-group;
+}
+
+.message-content tbody {
+  display: table-row-group;
+}
+
+.message-content tr {
+  display: table-row;
 }
 
 .message-content thead th {
@@ -757,6 +776,8 @@ html, body {
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   color: var(--text-secondary);
+  word-break: break-word;
+  max-width: 200px;
 }
 
 .message-content tbody tr:hover td {
@@ -780,6 +801,23 @@ html, body {
   font-size: 0.78rem;
   color: oklch(0.38 0.1 200);
   font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  word-break: break-all;
+}
+
+.message-content h1, .message-content h2, .message-content h3 {
+  color: var(--text-primary);
+  margin: 12px 0 8px 0;
+  font-weight: 650;
+}
+
+.message-content h1 { font-size: 1.1rem; }
+.message-content h2 { font-size: 1rem; }
+.message-content h3 { font-size: 0.9rem; }
+
+.message-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
 }
 
 /* ── SQL Toggle ───────────────────────────────────────────────── */
@@ -960,14 +998,20 @@ html, body {
   flex-direction: row;
   flex-wrap: wrap;
   gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 .chip--suggestion {
-  flex: 1 1 auto;
-  min-width: min(100%, 200px);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   min-height: 40px;
   padding: 8px 12px;
   font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .chip:disabled {

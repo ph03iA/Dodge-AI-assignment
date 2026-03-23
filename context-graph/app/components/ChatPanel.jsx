@@ -27,13 +27,23 @@ function readSuggestionsExpanded() {
   return true;
 }
 
-/** Align with brief §4 example queries (a–c) plus one open-ended analytic. */
+/** Align with brief §4 example queries (a–c) plus additional analytics. */
 const EXAMPLE_CHIPS = [
   'Which products are associated with the highest number of billing documents?',
   'Trace the full flow of billing document 90504248: Sales Order → Delivery → Billing → Journal Entry',
   'Which sales orders were delivered but not billed?',
   'Which sales orders were billed but have no matching delivery?',
   'What is the total revenue by customer?',
+  'Top 10 customers by total billing amount',
+  'Which customers have overdue or uncleared payments?',
+  'How many billing documents were cancelled in the last month?',
+  'Show all journal entries for a specific accounting document',
+  'Which products have the highest sales order quantity?',
+  'List all deliveries pending goods movement (status A)',
+  'Which customers have orders but no deliveries yet?',
+  'What is the average order value by distribution channel?',
+  'Which plants have the most delivery activity?',
+  'Find sales orders with rejected items',
 ];
 
 export default function ChatPanel({ onHighlightNodes }) {
