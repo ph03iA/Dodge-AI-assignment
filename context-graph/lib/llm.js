@@ -339,13 +339,13 @@ Rules:
 20. Customers with orders but no deliveries: FROM sales_orders so LEFT JOIN delivery_items di ON di.reference_sd_document = so.sales_order WHERE di.delivery_document IS NULL. Include customer info via so.sold_to_party → customers.
 21. Average order value by distribution channel: FROM sales_orders. AVG(total_net_amount) GROUP BY distribution_channel. ORDER BY avg DESC.
 22. Plants with most delivery activity: FROM delivery_items. COUNT(DISTINCT delivery_document) GROUP BY plant. JOIN plants for plant_name. ORDER BY count DESC LIMIT 20.
-23. Rejected sales order items: FROM sales_order_items WHERE salesDocumentRjcnReason IS NOT NULL AND salesDocumentRjcnReason != ''. Include sales_order, item, material, rejection_reason.
+23. Rejected sales order items: FROM sales_order_items WHERE sales_order IS NOT NULL AND salesDocumentRjcnReason IS NOT NULL AND salesDocumentRjcnReason != ''. Include sales_order, sales_order_item, material, salesDocumentRjcnReason.
 
 Example trace query (output SQL only, no prose; use the billing document number from the user's message in WHERE):
-SELECT bd.billing_document, bdi.reference_sd_document AS sales_order, di.delivery_document, bd.company_code, bd.fiscal_year, bd.accounting_document, je.accounting_document_item, je.amount_in_trans_currency
+SELECT bd.billing_document, bdi.reference_sd_document AS delivery_doc, di.reference_sd_document AS sales_order, d.creation_date AS delivery_date, bd.company_code, bd.fiscal_year, bd.accounting_document, je.accounting_document_item, je.amount_in_trans_currency
 FROM billing_documents bd
 INNER JOIN billing_document_items bdi ON bdi.billing_document = bd.billing_document
-LEFT JOIN delivery_items di ON di.reference_sd_document = bdi.reference_sd_document
+LEFT JOIN delivery_items di ON di.delivery_document = bdi.reference_sd_document
 LEFT JOIN deliveries d ON d.delivery_document = di.delivery_document
 LEFT JOIN journal_entries je ON je.company_code = bd.company_code AND je.fiscal_year = bd.fiscal_year AND je.accounting_document = bd.accounting_document
 WHERE bd.billing_document = '90504248'

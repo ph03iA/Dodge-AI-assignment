@@ -992,26 +992,29 @@ html, body {
 .chat-suggestions-body-inner {
   padding: 0 16px 12px;
   padding-top: 2px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .chip-container--suggestions {
-  flex-direction: row;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .chip--suggestion {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 100%;
+  width: 100%;
   min-height: 40px;
   padding: 8px 12px;
   font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
+  text-align: left;
 }
 
 .chip:disabled {

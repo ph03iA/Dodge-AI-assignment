@@ -85,8 +85,13 @@ export async function GET(request) {
             if (bd.accounting_document) {
               data.journalEntries = await sql`SELECT * FROM journal_entries WHERE company_code = ${bd.company_code} AND fiscal_year = ${bd.fiscal_year} AND accounting_document = ${bd.accounting_document}`;
             }
-            const soIds = [...new Set(data.billingItems.map(bi => bi.reference_sd_document).filter(Boolean))];
-            if (soIds.length) data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
+            // billing_items.reference_sd_document = delivery_document, need to get sales_order via delivery_items
+            const deliveryIds = [...new Set(data.billingItems.map(bi => bi.reference_sd_document).filter(Boolean))];
+            if (deliveryIds.length) {
+              const diRows = await sql`SELECT DISTINCT reference_sd_document FROM delivery_items WHERE delivery_document = ANY(${deliveryIds})`;
+              const soIds = diRows.map(r => r.reference_sd_document).filter(Boolean);
+              if (soIds.length) data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
+            }
           }
           break;
         }

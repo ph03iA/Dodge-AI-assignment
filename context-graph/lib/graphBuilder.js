@@ -198,7 +198,7 @@ export function buildGraph(data) {
     }
   }
 
-  // Billing Document Items — link billing to sales order
+  // Billing Document Items — link billing to delivery (billing_item.reference_sd_document = delivery_document)
   if (data.billingItems) {
     for (const bi of data.billingItems) {
       addNode(
@@ -209,7 +209,8 @@ export function buildGraph(data) {
       );
       addLink(`billing:${bi.billing_document}`, `billing_item:${bi.billing_document}:${bi.billing_document_item}`, 'has_item');
       if (bi.reference_sd_document) {
-        addLink(`sales_order:${bi.reference_sd_document}`, `billing:${bi.billing_document}`, 'invoiced_as');
+        // billing_item.reference_sd_document = delivery_document (not sales_order)
+        addLink(`delivery:${bi.reference_sd_document}`, `billing:${bi.billing_document}`, 'invoiced_as');
       }
       if (bi.material) {
         addLink(`billing_item:${bi.billing_document}:${bi.billing_document_item}`, `product:${bi.material}`, 'for_product');
@@ -384,10 +385,15 @@ export async function getNodeNeighbors(id, type) {
         }
         if (bd.accounting_document && bd.company_code && bd.fiscal_year) {
           data.journalEntries = await sql`SELECT * FROM journal_entries WHERE company_code = ${bd.company_code} AND fiscal_year = ${bd.fiscal_year} AND accounting_document = ${bd.accounting_document}`;
-        }
-        const soIds = [...new Set(data.billingItems.map(bi => bi.reference_sd_document).filter(Boolean))];
-        if (soIds.length > 0) {
-          data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
+}
+        // billing_items.reference_sd_document = delivery_document, need to get sales_order via delivery_items
+        const deliveryIds = [...new Set(data.billingItems.map(bi => bi.reference_sd_document).filter(Boolean))];
+        if (deliveryIds.length > 0) {
+          const diRows = await sql`SELECT DISTINCT reference_sd_document FROM delivery_items WHERE delivery_document = ANY(${deliveryIds})`;
+          const soIds = [...new Set(diRows.map(r => r.reference_sd_document).filter(Boolean))];
+          if (soIds.length > 0) {
+            data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
+          }
         }
       }
       break;
@@ -441,9 +447,13 @@ export async function getNodeNeighbors(id, type) {
         await sql`SELECT * FROM billing_document_items WHERE billing_document = ${bd} AND billing_document_item = ${bitem}`;
       data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ${bd}`;
       const bi = data.billingItems[0];
+      // billing_item.reference_sd_document = delivery_document, need to get sales_order via delivery_items
       if (bi?.reference_sd_document) {
-        data.salesOrders =
-          await sql`SELECT * FROM sales_orders WHERE sales_order = ${bi.reference_sd_document}`;
+        const diRows = await sql`SELECT DISTINCT reference_sd_document FROM delivery_items WHERE delivery_document = ${bi.reference_sd_document}`;
+        const soIds = diRows.map(r => r.reference_sd_document).filter(Boolean);
+        if (soIds.length > 0) {
+          data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
+        }
       }
       if (bi?.material) {
         data.products =
