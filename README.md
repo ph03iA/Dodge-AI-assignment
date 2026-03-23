@@ -1,5 +1,7 @@
 # Context Graph 📊 (DODGE AI Assignment)
 
+![Dodge AI](context-graph/pngs/dodge%20ai.png)
+
 A full-stack, graph-based data modeling and conversational query system designed around an SAP Order-to-Cash (O2C) dataset. 
 
 This project solves the challenge of structuring complex business entities (Customers, Orders, Deliveries, Invoices) into an interactive graph relationship model, while simultaneously providing a powerful, grounded AI assistant capable of answering deep analytical questions about the supply chain flow.

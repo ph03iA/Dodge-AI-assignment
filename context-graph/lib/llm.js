@@ -312,7 +312,7 @@ Rules:
    LIMIT 50
 
 9. INCOMPLETE FLOWS - Billed without delivery: Find deliveries that have billing but the sales order has no delivery record. Since billing references deliveries, check for billing items whose delivery has no matching sales order:
-   SELECT DISTINCT bd.billing_document, bd.total_net_amount, bdi.reference_sd_document AS delivery_doc, 'billed_delivery_no_order' AS status
+   SELECT DISTINCT bd.billing_document, bd.total_net_amount, bd.creation_date, bdi.reference_sd_document AS delivery_doc, 'billed_delivery_no_order' AS status
    FROM billing_documents bd
    INNER JOIN billing_document_items bdi ON bdi.billing_document = bd.billing_document
    LEFT JOIN delivery_items di ON di.delivery_document = bdi.reference_sd_document AND di.reference_sd_document IS NOT NULL
@@ -331,15 +331,15 @@ Rules:
    LIMIT 100
 13. Products with the highest number of billing documents: use billing_document_items (material = product). COUNT(DISTINCT bdi.billing_document) GROUP BY bdi.material. JOIN products p ON p.product = bdi.material LEFT JOIN product_descriptions pd ON pd.product = bdi.material AND pd.language = 'EN'. ORDER BY count DESC LIMIT 20–50.
 14. Top customers by billing amount: JOIN billing_documents.sold_to_party → customers.business_partner. SUM(billing_documents.total_net_amount) GROUP BY customer name. ORDER BY total DESC LIMIT 10-20.
-15. Customers with uncleared payments/payments: JOIN payments with customers. Look for payments.accounting_document where clearing_date IS NULL or payments without matching journal entries. Include customer name and payment amount.
+15. Customers with uncleared payments: Check journal_entries (not payments) where clearing_date IS NULL or clearing_document IS NULL to find unpaid open items. JOIN customers. Include customer name, accounting_document, and amount.
 16. Cancelled billing documents: FROM billing_document_cancellations. JOIN billing_documents on cancelled_billing_doc. Return cancellation date, original billing doc, amount, and customer.
-17. Journal entries for accounting document: FROM journal_entries WHERE company_code = X AND fiscal_year = Y AND accounting_document = Z. Include amount_in_trans_currency, gl_account, posting_date.
+17. Journal entries for accounting document: FROM journal_entries WHERE company_code = X AND fiscal_year = Y AND accounting_document = Z. Include amount_in_trans_currency, gl_account. If the user does not specify a document number, simply return 50 recent journal_entries.
 18. Products with highest order quantity: FROM sales_order_items. SUM(requested_quantity) GROUP BY material. JOIN products and product_descriptions for names. ORDER BY total_quantity DESC LIMIT 20.
 19. Deliveries pending goods movement: FROM deliveries WHERE overall_goods_movement_status = 'A' (or similar pending status). Include delivery_document, creation_date, shipping_point.
 20. Customers with orders but no deliveries: FROM sales_orders so LEFT JOIN delivery_items di ON di.reference_sd_document = so.sales_order WHERE di.delivery_document IS NULL. Include customer info via so.sold_to_party → customers.
 21. Average order value by distribution channel: FROM sales_orders. AVG(total_net_amount) GROUP BY distribution_channel. ORDER BY avg DESC.
 22. Plants with most delivery activity: FROM delivery_items. COUNT(DISTINCT delivery_document) GROUP BY plant. JOIN plants for plant_name. ORDER BY count DESC LIMIT 20.
-23. Rejected sales order items: FROM sales_order_items WHERE sales_order IS NOT NULL AND salesDocumentRjcnReason IS NOT NULL AND salesDocumentRjcnReason != ''. Include sales_order, sales_order_item, material, salesDocumentRjcnReason.
+23. Rejected sales order items: FROM sales_order_items WHERE sales_order IS NOT NULL AND rejection_reason IS NOT NULL AND rejection_reason != ''. Include sales_order, sales_order_item, material, rejection_reason.
 
 Example trace query (output SQL only, no prose; use the billing document number from the user's message in WHERE):
 SELECT bd.billing_document, bdi.reference_sd_document AS delivery_doc, di.reference_sd_document AS sales_order, d.creation_date AS delivery_date, bd.company_code, bd.fiscal_year, bd.accounting_document, je.accounting_document_item, je.amount_in_trans_currency
