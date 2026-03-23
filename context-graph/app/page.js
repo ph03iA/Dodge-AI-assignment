@@ -1,64 +1,222 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
+import ChatPanel from './components/ChatPanel';
+
+const GraphView = dynamic(() => import('./components/GraphView'), { ssr: false });
+
+const CHAT_WIDTH_STORAGE_KEY = 'context-graph-chat-width';
+const DEFAULT_CHAT_WIDTH = 400;
+const MIN_CHAT_WIDTH = 280;
+const MAX_CHAT_WIDTH = 720;
+
+function readStoredChatWidth() {
+  if (typeof window === 'undefined') return DEFAULT_CHAT_WIDTH;
+  try {
+    const raw = localStorage.getItem(CHAT_WIDTH_STORAGE_KEY);
+    if (!raw) return DEFAULT_CHAT_WIDTH;
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n)) {
+      return Math.min(MAX_CHAT_WIDTH, Math.max(MIN_CHAT_WIDTH, n));
+    }
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_CHAT_WIDTH;
+}
+
+function setMobileTabWithTransition(next) {
+  if (typeof document !== 'undefined' && document.startViewTransition) {
+    document.startViewTransition(() => {
+      // React 18+ batches setState inside startViewTransition in concurrent mode
+      next();
+    });
+    return;
+  }
+  next();
+}
 
 export default function Home() {
+  const [highlightIds, setHighlightIds] = useState([]);
+  const [showGraph, setShowGraph] = useState(true);
+  const [isNarrow, setIsNarrow] = useState(false);
+  const [mobileTab, setMobileTab] = useState('graph');
+  /** Same value on server + first client paint — read localStorage after mount to avoid hydration mismatch. */
+  const [chatWidthPx, setChatWidthPx] = useState(DEFAULT_CHAT_WIDTH);
+  const resizeRef = useRef({ active: false, startX: 0, startW: 0 });
+  const splitResizerElRef = useRef(null);
+
+  useEffect(() => {
+    setChatWidthPx(readStoredChatWidth());
+  }, []);
+
+  useEffect(() => {
+    const q = window.matchMedia('(max-width: 768px)');
+    const apply = () => setIsNarrow(q.matches);
+    apply();
+    q.addEventListener('change', apply);
+    return () => q.removeEventListener('change', apply);
+  }, []);
+
+  const onResizePointerDown = useCallback((e) => {
+    if (e.button !== 0) return;
+    const el = e.currentTarget;
+    splitResizerElRef.current = el;
+    el.setPointerCapture(e.pointerId);
+    resizeRef.current = {
+      active: true,
+      startX: e.clientX,
+      startW: chatWidthPx,
+    };
+    el.classList.add('is-active');
+  }, [chatWidthPx]);
+
+  const onResizePointerMove = useCallback((e) => {
+    if (!resizeRef.current.active) return;
+    const { startX, startW } = resizeRef.current;
+    const delta = startX - e.clientX;
+    const next = Math.min(MAX_CHAT_WIDTH, Math.max(MIN_CHAT_WIDTH, startW + delta));
+    setChatWidthPx(next);
+  }, []);
+
+  const endResize = useCallback((e) => {
+    const was = resizeRef.current.active;
+    resizeRef.current.active = false;
+    const el = splitResizerElRef.current;
+    if (el) {
+      el.classList.remove('is-active');
+      try {
+        if (e?.pointerId != null) el.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (was) {
+      setChatWidthPx((w) => {
+        try {
+          localStorage.setItem(CHAT_WIDTH_STORAGE_KEY, String(w));
+        } catch {
+          /* ignore */
+        }
+        return w;
+      });
+    }
+  }, []);
+
+  const onResizeDoubleClick = useCallback(() => {
+    setChatWidthPx(DEFAULT_CHAT_WIDTH);
+    try {
+      localStorage.setItem(CHAT_WIDTH_STORAGE_KEY, String(DEFAULT_CHAT_WIDTH));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const chatVisible = !isNarrow || mobileTab === 'chat';
+  /** Desktop side-by-side layout when graph + query both shown. */
+  const splitDesktop = !isNarrow && showGraph;
+  const chatOnlyDesktop = !isNarrow && !showGraph;
+  /** Keep graph mounted on mobile so tab switches do not refetch / re-layout the canvas. */
+  const graphMounted = showGraph || isNarrow;
+  const graphSimulationActive = !isNarrow ? showGraph : mobileTab === 'graph';
+  /** Keep chat mounted on mobile so the transcript survives Graph ↔ Query switches. */
+  const chatMounted = isNarrow || chatVisible;
+
+  const goMobileTab = useCallback((tab) => {
+    setMobileTabWithTransition(() => setMobileTab(tab));
+  }, []);
+
+  const onHighlightNodes = useCallback((ids) => {
+    setHighlightIds(ids);
+    if (isNarrow && ids.length) setMobileTabWithTransition(() => setMobileTab('graph'));
+  }, [isNarrow]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="app-layout">
+      <header className="app-header">
+        <div className="header-left">
+          <h1 className="app-title">Context Graph</h1>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <div className="header-right">
+          {isNarrow ? (
+            <div className="header-segments" role="tablist" aria-label="Main panels">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mobileTab === 'graph'}
+                className={`segment-btn${mobileTab === 'graph' ? ' is-active' : ''}`}
+                onClick={() => goMobileTab('graph')}
+              >
+                Graph
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mobileTab === 'chat'}
+                className={`segment-btn${mobileTab === 'chat' ? ' is-active' : ''}`}
+                onClick={() => goMobileTab('chat')}
+              >
+                Query
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="toggle-btn"
+              onClick={() => setShowGraph(!showGraph)}
+            >
+              {showGraph ? 'Focus query' : 'Show graph'}
+            </button>
+          )}
+        </div>
+      </header>
+
+      <main
+        className={`app-main${chatOnlyDesktop ? ' app-main--chat-only' : ''}${splitDesktop && chatVisible ? ' app-main--split' : ''}`}
+      >
+        {graphMounted && (
+          <div
+            className={`graph-pane${isNarrow ? ' graph-pane--narrow-vt' : ''}${isNarrow && mobileTab !== 'graph' ? ' graph-pane--stack-hidden' : ''}`}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            <GraphView
+              highlightIds={highlightIds}
+              simulationActive={graphSimulationActive}
+              onNodeSelect={() => {}}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+          </div>
+        )}
+        {splitDesktop && !isNarrow && (
+          <div
+            ref={splitResizerElRef}
+            role="separator"
+            aria-orientation="vertical"
+            aria-valuenow={chatWidthPx}
+            aria-valuemin={MIN_CHAT_WIDTH}
+            aria-valuemax={MAX_CHAT_WIDTH}
+            aria-label="Resize query panel"
+            title="Drag to resize. Double-click to reset."
+            className="split-resizer"
+            onPointerDown={onResizePointerDown}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            onLostPointerCapture={endResize}
+            onDoubleClick={onResizeDoubleClick}
+          />
+        )}
+        {chatMounted && (
+          <div
+            className={`chat-pane${isNarrow ? ' chat-pane--narrow-vt' : ''}${isNarrow && mobileTab !== 'chat' ? ' chat-pane--stack-hidden' : ''}${splitDesktop && !isNarrow ? ' chat-pane--sized' : ''}`}
+            style={
+              splitDesktop && !isNarrow
+                ? { width: chatWidthPx, flexShrink: 0, flexGrow: 0 }
+                : undefined
+            }
           >
-            Documentation
-          </a>
-        </div>
+            <ChatPanel onHighlightNodes={onHighlightNodes} />
+          </div>
+        )}
       </main>
     </div>
   );
