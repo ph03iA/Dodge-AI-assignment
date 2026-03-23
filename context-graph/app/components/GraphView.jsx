@@ -1,22 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { NODE_COLORS } from '@/lib/nodeColors';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
 
-/**
- * Clone node props for the detail panel (avoids force-graph internal refs / proxies).
- * JSON round-trip matches production JSON from /api/graph better than shallow spread.
- */
+/** Deep clone so the panel retains all metadata regardless of force-graph's internal mutations. */
 function snapshotNode(node) {
   if (!node || typeof node !== 'object') return node;
   try {
-    return JSON.parse(
-      JSON.stringify(node, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
-    );
+    return JSON.parse(JSON.stringify(node));
   } catch {
     return { ...node };
   }
@@ -174,9 +168,7 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
     []
   );
 
-  const handleNodeClick = useCallback((node, evt) => {
-    evt?.stopPropagation?.();
-    evt?.preventDefault?.();
+  const handleNodeClick = useCallback((node) => {
     const snap = snapshotNode(node);
     setSelected(snap);
     if (onNodeSelect) onNodeSelect(snap);
@@ -238,96 +230,84 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
     );
   }
 
-  const nodePanel =
-    selected &&
-    typeof document !== 'undefined' &&
-    createPortal(
-      <div
-        className="node-panel node-panel--portal"
-        role="dialog"
-        aria-modal="false"
-        aria-label="Node details"
-      >
-        <div className="node-panel-header">
-          <span className="node-type-badge" style={{ backgroundColor: selected.color }}>
-            {TYPE_LABELS[selected.type] || selected.type}
-          </span>
-          <button type="button" className="node-panel-close" onClick={() => setSelected(null)} aria-label="Close details">
-            &times;
+  return (
+    <div ref={containerRef} className="graph-container">
+      {setupHint && (
+        <div className="graph-setup-hint" role="status">
+          {setupHint}
+        </div>
+      )}
+      {/* Legend */}
+      <div className="graph-legend">
+        {legendItems.map(({ type, color }) => (
+          <div key={type} className="legend-item">
+            <span className="legend-dot" style={{ backgroundColor: color }} />
+            <span>{TYPE_LABELS[type] || type}</span>
+          </div>
+        ))}
+        <div className="legend-counts">
+          {graphData.nodes.length} nodes &middot; {graphData.links.length} edges
+        </div>
+      </div>
+
+      {/* Force Graph */}
+      <ForceGraph2D
+        ref={fgRef}
+        width={dimensions.width}
+        height={dimensions.height}
+        graphData={graphData}
+        backgroundColor="oklch(0.94 0.02 230)"
+        nodeCanvasObject={nodeCanvasObject}
+        nodePointerAreaPaint={(node, color, ctx) => {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = color;
+          ctx.fill();
+        }}
+        linkColor={() => 'rgba(51, 65, 85, 0.22)'}
+        linkDirectionalArrowLength={3}
+        linkDirectionalArrowRelPos={1}
+        linkWidth={1}
+        onNodeClick={handleNodeClick}
+        onNodeRightClick={handleNodeRightClick}
+        cooldownTicks={100}
+        d3AlphaDecay={0.02}
+        d3VelocityDecay={0.3}
+      />
+
+      {/* Selected node panel */}
+      {selected && (
+        <div className="node-panel">
+          <div className="node-panel-header">
+            <span className="node-type-badge" style={{ backgroundColor: selected.color }}>
+              {TYPE_LABELS[selected.type] || selected.type}
+            </span>
+            <button type="button" className="node-panel-close" onClick={() => setSelected(null)} aria-label="Close details">&times;</button>
+          </div>
+          <h3 className="node-panel-title">{selected.label}</h3>
+          <div className="node-panel-meta">
+            <div className="meta-row">
+              <span className="meta-key">id</span>
+              <span className="meta-value meta-value--mono">{formatMetaValue(selected.id)}</span>
+            </div>
+            <div className="meta-row">
+              <span className="meta-key">type</span>
+              <span className="meta-value">{formatMetaValue(selected.type)}</span>
+            </div>
+            {Object.entries(selected)
+              .filter(([k]) => !PANEL_SKIP_KEYS.has(k))
+              .map(([k, v]) => (
+                <div key={k} className="meta-row">
+                  <span className="meta-key">{k}</span>
+                  <span className="meta-value">{formatMetaValue(v)}</span>
+                </div>
+              ))}
+          </div>
+          <button type="button" className="expand-btn" onClick={() => expandNode(selected.id)}>
+            Expand Neighbors
           </button>
         </div>
-        <h3 className="node-panel-title">{selected.label}</h3>
-        <div className="node-panel-meta">
-          <div className="meta-row">
-            <span className="meta-key">id</span>
-            <span className="meta-value meta-value--mono">{formatMetaValue(selected.id)}</span>
-          </div>
-          <div className="meta-row">
-            <span className="meta-key">type</span>
-            <span className="meta-value">{formatMetaValue(selected.type)}</span>
-          </div>
-          {Object.entries(selected)
-            .filter(([k]) => !PANEL_SKIP_KEYS.has(k))
-            .map(([k, v]) => (
-              <div key={k} className="meta-row">
-                <span className="meta-key">{k}</span>
-                <span className="meta-value">{formatMetaValue(v)}</span>
-              </div>
-            ))}
-        </div>
-        <button type="button" className="expand-btn" onClick={() => expandNode(selected.id)}>
-          Expand Neighbors
-        </button>
-      </div>,
-      document.body
-    );
-
-  return (
-    <>
-      <div ref={containerRef} className="graph-container">
-        {setupHint && (
-          <div className="graph-setup-hint" role="status">
-            {setupHint}
-          </div>
-        )}
-        {/* Legend */}
-        <div className="graph-legend">
-          {legendItems.map(({ type, color }) => (
-            <div key={type} className="legend-item">
-              <span className="legend-dot" style={{ backgroundColor: color }} />
-              <span>{TYPE_LABELS[type] || type}</span>
-            </div>
-          ))}
-          <div className="legend-counts">
-            {graphData.nodes.length} nodes &middot; {graphData.links.length} edges
-          </div>
-        </div>
-
-        <ForceGraph2D
-          ref={fgRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          graphData={graphData}
-          backgroundColor="oklch(0.94 0.02 230)"
-          nodeCanvasObject={nodeCanvasObject}
-          nodePointerAreaPaint={(node, color, ctx) => {
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, 5, 0, 2 * Math.PI);
-            ctx.fillStyle = color;
-            ctx.fill();
-          }}
-          linkColor={() => 'rgba(51, 65, 85, 0.22)'}
-          linkDirectionalArrowLength={3}
-          linkDirectionalArrowRelPos={1}
-          linkWidth={1}
-          onNodeClick={handleNodeClick}
-          onNodeRightClick={handleNodeRightClick}
-          cooldownTicks={100}
-          d3AlphaDecay={0.02}
-          d3VelocityDecay={0.3}
-        />
-      </div>
-      {nodePanel}
-    </>
+      )}
+    </div>
   );
 }
