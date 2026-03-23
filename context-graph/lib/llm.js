@@ -5,14 +5,16 @@ import { GoogleGenAI } from '@google/genai';
  *
  * GEMINI_API_KEY          — single key (default provider)
  * GEMINI_API_KEYS         — comma-separated keys; tries each on rate limit before other providers
- * GEMINI_MODEL            — e.g. gemini-2.0-flash
+ * GEMINI_MODEL            — e.g. gemini-2.5-flash (use exact id from AI Studio)
  *
- * LLM_FALLBACK_ORDER      — comma list, default: gemini,groq,openrouter
- *   Skips providers with missing keys.
+ * LLM_FALLBACK_ORDER      — comma list, default: gemini,groq,openrouter,huggingface
+ *   Skips providers with missing keys. Aliases: hf → huggingface
  *
  * GROQ_API_KEY + GROQ_MODEL (default llama-3.3-70b-versatile)
  * OPENROUTER_API_KEY + OPENROUTER_MODEL (e.g. google/gemini-2.0-flash-001)
  * OPENROUTER_SITE_URL     — optional, for OpenRouter rankings
+ *
+ * HUGGINGFACE_API_KEY + HUGGINGFACE_CHAT_MODEL (OpenAI-compatible router, default Llama 3.2 3B Instruct :fastest)
  */
 
 const DB_SCHEMA = `
@@ -54,9 +56,11 @@ Key joins:
 - product_storage_locations.(product,plant) → product_plants optional path; storage rows reference products and plants
 `.trim();
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001';
+const HUGGINGFACE_CHAT_MODEL =
+  process.env.HUGGINGFACE_CHAT_MODEL || 'meta-llama/Llama-3.2-3B-Instruct:fastest';
 
 function geminiKeyList() {
   const multi = process.env.GEMINI_API_KEYS;
@@ -68,15 +72,22 @@ function geminiKeyList() {
 }
 
 function fallbackOrder() {
-  const raw = process.env.LLM_FALLBACK_ORDER || 'gemini,groq,openrouter';
-  return raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const raw = process.env.LLM_FALLBACK_ORDER || 'gemini,groq,openrouter,huggingface';
+  return raw
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .map((s) => (s === 'hf' ? 'huggingface' : s))
+    .filter(Boolean);
 }
 
 function isRetryableLlmError(err) {
   const status = err?.status ?? err?.statusCode ?? err?.code;
+  // Wrong model name / API shape — retrying another key won't help.
+  if (status === 404) return false;
   if (status === 429 || status === 503 || status === 529) return true;
   if (status === 402) return true;
   const msg = String(err?.message || err?.error?.message || err || '').toLowerCase();
+  if (/not\s+found|not_supported|invalid.*model|unknown.*model/i.test(msg)) return false;
   return /rate|quota|resource_exhausted|resource exhausted|too many requests|429|503|overloaded|capacity|billing|exhausted/i.test(
     msg
   );
@@ -108,7 +119,7 @@ async function geminiGenerateWithKeyRotation(args) {
     } catch (e) {
       lastErr = e;
       if (!isRetryableLlmError(e)) throw e;
-      console.warn('[llm] Gemini key exhausted or rate-limited, trying next key/provider…');
+      console.warn('[llm] Gemini transient error, trying next key…');
     }
   }
   throw lastErr;
@@ -178,6 +189,18 @@ async function openRouterGenerate(args) {
   );
 }
 
+async function huggingFaceGenerate(args) {
+  const key = process.env.HUGGINGFACE_API_KEY;
+  if (!key) throw new Error('HUGGINGFACE_API_KEY not set');
+  return openAiCompatibleChat(
+    'https://router.huggingface.co/v1/chat/completions',
+    key,
+    HUGGINGFACE_CHAT_MODEL,
+    {},
+    args
+  );
+}
+
 /**
  * Run text generation with provider order + Gemini key rotation.
  * On rate limit / quota, tries next key (Gemini) then next provider.
@@ -200,6 +223,10 @@ async function generateText(args) {
         if (!process.env.OPENROUTER_API_KEY) continue;
         return await openRouterGenerate(args);
       }
+      if (provider === 'huggingface') {
+        if (!process.env.HUGGINGFACE_API_KEY) continue;
+        return await huggingFaceGenerate(args);
+      }
     } catch (e) {
       lastErr = e;
       if (!isRetryableLlmError(e)) throw e;
@@ -207,7 +234,9 @@ async function generateText(args) {
     }
   }
 
-  throw lastErr || new Error('No LLM provider succeeded. Set GEMINI_API_KEY, GROQ_API_KEY, and/or OPENROUTER_API_KEY.');
+  throw lastErr || new Error(
+    'No LLM provider succeeded. Set GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, and/or HUGGINGFACE_API_KEY.'
+  );
 }
 
 // ── Guardrail check ────────────────────────────────────────────

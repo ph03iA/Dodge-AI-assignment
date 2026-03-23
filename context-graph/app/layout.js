@@ -15,8 +15,8 @@ const sourceSans = Source_Sans_3({
 });
 
 export const metadata = {
-  title: "Context Graph — SAP O2C Explorer",
-  description: "Interactive graph visualization and natural language query interface for SAP Order-to-Cash data. Explore sales orders, deliveries, billing documents, journal entries, payments, and more.",
+  title: "O2C Graph & Query",
+  description: "SAP Order-to-Cash: interactive graph + natural language SQL over Neon.",
 };
 
 export default function RootLayout({ children }) {
