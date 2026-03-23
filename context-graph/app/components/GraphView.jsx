@@ -258,12 +258,7 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
         graphData={graphData}
         backgroundColor="oklch(0.94 0.02 230)"
         nodeCanvasObject={nodeCanvasObject}
-        nodePointerAreaPaint={(node, color, ctx) => {
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, 5, 0, 2 * Math.PI);
-          ctx.fillStyle = color;
-          ctx.fill();
-        }}
+        nodeRelSize={5}
         linkColor={() => 'rgba(51, 65, 85, 0.22)'}
         linkDirectionalArrowLength={0}
         linkWidth={0.5}
