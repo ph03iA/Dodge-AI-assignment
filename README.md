@@ -24,6 +24,11 @@ For the supply chain data model, **Neon (Serverless PostgreSQL)** was chosen ove
 
 ### 3. LLM Prompting Strategy
 The Conversational Query Interface operates on a carefully orchestrated, multi-step prompting pipeline designed to strictly eliminate hallucinations:
+
+**Multi-AI Brainstorming & Cross-Checking:**
+Before committing to any architectural or prompting decision, every plan was brainstormed across multiple AI models — **Claude, Gemini, GLM-5, MiniMax M2.7, and GPT** — to gather diverse perspectives. Each model's suggestions were cross-checked against one another to identify the most robust, reliable approach. Only after consensus across models was a plan finalized and implemented. This ensured that schema design, prompt engineering, and query pipeline decisions were thoroughly vetted from multiple angles before any code was written.
+
+**Runtime Query Pipeline:**
 1. **Schema Injection:** The LLM is provided with the exact, deterministic SQL schema of the O2C dataset in the system prompt. It is prohibited from guessing table names.
 2. **Text-to-SQL Generation:** The user's natural language query is passed to the LLM to generate an optimized Postgres SQL query.
 3. **Execution & Contextualization:** The SQL query is executed securely on the backend. The raw data rows (ground truth) are then returned to a *second* LLM call—the "Synthesizer."
