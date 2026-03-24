@@ -103,6 +103,34 @@ html, body {
   color: var(--text-primary);
 }
 
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition:
+    color var(--t-reveal) var(--ease-out-quart),
+    background var(--t-reveal) var(--ease-out-quart),
+    border-color var(--t-reveal) var(--ease-out-quart);
+}
+
+.github-link:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+}
+
+.github-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .header-right {
   display: flex;
   align-items: center;
