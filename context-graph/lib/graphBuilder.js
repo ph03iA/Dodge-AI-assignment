@@ -280,15 +280,20 @@ export function buildGraph(data) {
     }
   }
 
-  // Cross-link billing → journal via accounting document
+  // Cross-link billing → journal via accounting document (O(n) via Map)
   if (data.billingDocuments && data.journalEntries) {
+    const jeMap = new Map();
+    for (const je of data.journalEntries) {
+      const key = `${je.company_code}:${je.fiscal_year}:${je.accounting_document}`;
+      if (!jeMap.has(key)) jeMap.set(key, []);
+      jeMap.get(key).push(je);
+    }
     for (const bd of data.billingDocuments) {
       if (bd.accounting_document && bd.company_code && bd.fiscal_year) {
-        for (const je of data.journalEntries) {
-          if (je.company_code === bd.company_code && je.fiscal_year === bd.fiscal_year && je.accounting_document === bd.accounting_document) {
-            const jeId = `journal_entry:${je.company_code}:${je.fiscal_year}:${je.accounting_document}:${je.accounting_document_item}`;
-            addLink(`billing:${bd.billing_document}`, jeId, 'posted_as');
-          }
+        const key = `${bd.company_code}:${bd.fiscal_year}:${bd.accounting_document}`;
+        for (const je of jeMap.get(key) || []) {
+          const jeId = `journal_entry:${je.company_code}:${je.fiscal_year}:${je.accounting_document}:${je.accounting_document_item}`;
+          addLink(`billing:${bd.billing_document}`, jeId, 'posted_as');
         }
       }
     }
@@ -298,6 +303,46 @@ export function buildGraph(data) {
     nodes: Array.from(nodeMap.values()),
     links,
   };
+}
+
+// ── Shared neighbor-fetching helpers ───────────────────────────
+
+/** Fetch products, product_plants, product_storage_locations, and plants for a list of material IDs. */
+async function fetchProductSubgraph(data, materials) {
+  if (!materials.length) return;
+  data.products = await sql`SELECT p.*, pd.description FROM products p LEFT JOIN product_descriptions pd ON p.product = pd.product AND pd.language = 'EN' WHERE p.product = ANY(${materials})`;
+  data.productPlants = await sql`SELECT * FROM product_plants WHERE product = ANY(${materials})`;
+  data.productStorageLocations =
+    await sql`SELECT * FROM product_storage_locations WHERE product = ANY(${materials}) LIMIT ${NEIGHBOR_MAX_PRODUCT_STORAGE_LOCS}`;
+  const plantIds = [
+    ...new Set([
+      ...(data.productPlants || []).map((p) => p.plant),
+      ...(data.productStorageLocations || []).map((p) => p.plant),
+    ]),
+  ].filter(Boolean);
+  if (plantIds.length) {
+    data.plants = await sql`SELECT * FROM plants WHERE plant = ANY(${plantIds})`;
+  }
+}
+
+/** Fetch billing documents linked through delivery IDs (billing_items.reference_sd_document = delivery_document). */
+async function fetchBillingViaDeliveries(data, deliveryIds) {
+  if (!deliveryIds.length) return;
+  data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ANY(${deliveryIds})`;
+  const billingIds = [...new Set((data.billingItems || []).map(bi => bi.billing_document))];
+  if (billingIds.length) {
+    data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${billingIds})`;
+  }
+}
+
+/** Resolve sales orders from delivery IDs via delivery_items.reference_sd_document. */
+async function fetchSalesOrdersViaDeliveries(data, deliveryIds) {
+  if (!deliveryIds.length) return;
+  const diRows = await sql`SELECT DISTINCT reference_sd_document FROM delivery_items WHERE delivery_document = ANY(${deliveryIds})`;
+  const soIds = [...new Set(diRows.map(r => r.reference_sd_document).filter(Boolean))];
+  if (soIds.length) {
+    data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
+  }
 }
 
 // ── Get neighbors for a single node ────────────────────────────
@@ -326,46 +371,22 @@ export async function getNodeNeighbors(id, type) {
         data.salesOrderItems = await sql`SELECT * FROM sales_order_items WHERE sales_order = ${id}`;
         data.salesOrderScheduleLines =
           await sql`SELECT * FROM sales_order_schedule_lines WHERE sales_order = ${id}`;
-        // Get deliveries linked through delivery items
         data.deliveryItems = await sql`SELECT * FROM delivery_items WHERE reference_sd_document = ${id}`;
         const deliveryIds = [...new Set(data.deliveryItems.map(di => di.delivery_document))];
-        if (deliveryIds.length > 0) {
+        if (deliveryIds.length) {
           data.deliveries = await sql`SELECT * FROM deliveries WHERE delivery_document = ANY(${deliveryIds})`;
         }
-        // Get billing linked through delivery (billing items reference delivery docs, not SO directly)
-        if (deliveryIds.length > 0) {
-          data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ANY(${deliveryIds})`;
-          const billingIds = [...new Set(data.billingItems.map(bi => bi.billing_document))];
-          if (billingIds.length > 0) {
-            data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${billingIds})`;
-          }
-        }
-        // Get products
+        await fetchBillingViaDeliveries(data, deliveryIds);
         const materials = [...new Set(data.salesOrderItems.map(i => i.material).filter(Boolean))];
-        if (materials.length > 0) {
-          data.products = await sql`SELECT p.*, pd.description FROM products p LEFT JOIN product_descriptions pd ON p.product = pd.product AND pd.language = 'EN' WHERE p.product = ANY(${materials})`;
-          data.productPlants = await sql`SELECT * FROM product_plants WHERE product = ANY(${materials})`;
-          data.productStorageLocations =
-            await sql`SELECT * FROM product_storage_locations WHERE product = ANY(${materials}) LIMIT ${NEIGHBOR_MAX_PRODUCT_STORAGE_LOCS}`;
-          const plantIds = [
-            ...new Set([
-              ...(data.productPlants || []).map((p) => p.plant),
-              ...(data.productStorageLocations || []).map((p) => p.plant),
-            ]),
-          ].filter(Boolean);
-          if (plantIds.length > 0) {
-            data.plants = await sql`SELECT * FROM plants WHERE plant = ANY(${plantIds})`;
-          }
-        }
+        await fetchProductSubgraph(data, materials);
       }
       break;
     }
     case 'delivery': {
       data.deliveries = await sql`SELECT * FROM deliveries WHERE delivery_document = ${id}`;
       data.deliveryItems = await sql`SELECT * FROM delivery_items WHERE delivery_document = ${id}`;
-      // Link back to sales orders
       const soIds = [...new Set(data.deliveryItems.map(di => di.reference_sd_document).filter(Boolean))];
-      if (soIds.length > 0) {
+      if (soIds.length) {
         data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
       }
       break;
@@ -385,16 +406,9 @@ export async function getNodeNeighbors(id, type) {
         }
         if (bd.accounting_document && bd.company_code && bd.fiscal_year) {
           data.journalEntries = await sql`SELECT * FROM journal_entries WHERE company_code = ${bd.company_code} AND fiscal_year = ${bd.fiscal_year} AND accounting_document = ${bd.accounting_document}`;
-}
-        // billing_items.reference_sd_document = delivery_document, need to get sales_order via delivery_items
-        const deliveryIds = [...new Set(data.billingItems.map(bi => bi.reference_sd_document).filter(Boolean))];
-        if (deliveryIds.length > 0) {
-          const diRows = await sql`SELECT DISTINCT reference_sd_document FROM delivery_items WHERE delivery_document = ANY(${deliveryIds})`;
-          const soIds = [...new Set(diRows.map(r => r.reference_sd_document).filter(Boolean))];
-          if (soIds.length > 0) {
-            data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
-          }
         }
+        const deliveryIds = [...new Set(data.billingItems.map(bi => bi.reference_sd_document).filter(Boolean))];
+        await fetchSalesOrdersViaDeliveries(data, deliveryIds);
       }
       break;
     }
@@ -407,22 +421,7 @@ export async function getNodeNeighbors(id, type) {
         data.salesOrderScheduleLines =
           await sql`SELECT * FROM sales_order_schedule_lines WHERE sales_order = ${so} AND sales_order_item = ${item}`;
         const m = data.salesOrderItems[0].material;
-        if (m) {
-          data.products =
-            await sql`SELECT p.*, pd.description FROM products p LEFT JOIN product_descriptions pd ON p.product = pd.product AND pd.language = 'EN' WHERE p.product = ${m}`;
-          data.productPlants = await sql`SELECT * FROM product_plants WHERE product = ${m}`;
-          data.productStorageLocations =
-            await sql`SELECT * FROM product_storage_locations WHERE product = ${m} LIMIT ${NEIGHBOR_MAX_PRODUCT_STORAGE_LOCS}`;
-          const plantIds = [
-            ...new Set([
-              ...(data.productPlants || []).map((p) => p.plant),
-              ...(data.productStorageLocations || []).map((p) => p.plant),
-            ]),
-          ].filter(Boolean);
-          if (plantIds.length) {
-            data.plants = await sql`SELECT * FROM plants WHERE plant = ANY(${plantIds})`;
-          }
-        }
+        await fetchProductSubgraph(data, m ? [m] : []);
       }
       break;
     }
@@ -447,13 +446,8 @@ export async function getNodeNeighbors(id, type) {
         await sql`SELECT * FROM billing_document_items WHERE billing_document = ${bd} AND billing_document_item = ${bitem}`;
       data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ${bd}`;
       const bi = data.billingItems[0];
-      // billing_item.reference_sd_document = delivery_document, need to get sales_order via delivery_items
       if (bi?.reference_sd_document) {
-        const diRows = await sql`SELECT DISTINCT reference_sd_document FROM delivery_items WHERE delivery_document = ${bi.reference_sd_document}`;
-        const soIds = diRows.map(r => r.reference_sd_document).filter(Boolean);
-        if (soIds.length > 0) {
-          data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
-        }
+        await fetchSalesOrdersViaDeliveries(data, [bi.reference_sd_document]);
       }
       if (bi?.material) {
         data.products =
@@ -531,24 +525,17 @@ export async function getNodeNeighbors(id, type) {
       break;
     }
     case 'product': {
-      data.products = await sql`SELECT p.*, pd.description FROM products p LEFT JOIN product_descriptions pd ON p.product = pd.product AND pd.language = 'EN' WHERE p.product = ${id}`;
       data.salesOrderItems = await sql`SELECT * FROM sales_order_items WHERE material = ${id} LIMIT 20`;
       const soIds = [...new Set(data.salesOrderItems.map(i => i.sales_order))];
-      if (soIds.length > 0) {
+      if (soIds.length) {
         data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
       }
       data.billingItems = await sql`SELECT * FROM billing_document_items WHERE material = ${id} LIMIT 20`;
       const billIds = [...new Set(data.billingItems.map(i => i.billing_document))];
-      if (billIds.length > 0) {
+      if (billIds.length) {
         data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${billIds})`;
       }
-      data.productPlants = await sql`SELECT * FROM product_plants WHERE product = ${id}`;
-      data.productStorageLocations =
-        await sql`SELECT * FROM product_storage_locations WHERE product = ${id} LIMIT ${NEIGHBOR_MAX_PRODUCT_STORAGE_LOCS}`;
-      const pPlants = [...new Set((data.productPlants || []).map((p) => p.plant))];
-      if (pPlants.length > 0) {
-        data.plants = await sql`SELECT * FROM plants WHERE plant = ANY(${pPlants})`;
-      }
+      await fetchProductSubgraph(data, [id]);
       break;
     }
     case 'journal_entry': {

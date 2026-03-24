@@ -117,338 +117,237 @@ async function batchUpsert(tableName, columns, jsonKeys, conflictKeys, rows) {
   return inserted;
 }
 
-// ── Table Ingest Functions ─────────────────────────────────────
+// ── Table Configs (data-driven) ────────────────────────────────
+// Each entry: { folder, table, columns[], jsonKeys[], pk[] }
 
-async function ingestCustomers() {
-  const rows = readJSONLParts('business_partners');
-  const columns = [
-    'business_partner', 'customer', 'category', 'full_name', 'grouping', 'name',
-    'correspondence_lang', 'created_by', 'creation_date', 'creation_time',
-    'first_name', 'form_of_address', 'industry', 'last_change_date', 'last_name',
-    'org_name1', 'org_name2', 'is_blocked', 'is_marked_for_archiving'
-  ];
-  const jsonKeys = [
-    'businessPartner', 'customer', 'businessPartnerCategory', 'businessPartnerFullName',
-    'businessPartnerGrouping', 'businessPartnerName', 'correspondenceLanguage',
-    'createdByUser', 'creationDate', 'creationTime', 'firstName', 'formOfAddress',
-    'industry', 'lastChangeDate', 'lastName', 'organizationBpName1', 'organizationBpName2',
-    'businessPartnerIsBlocked', 'isMarkedForArchiving'
-  ];
-  return batchUpsert('customers', columns, jsonKeys, ['business_partner'], rows);
-}
+const TABLE_CONFIGS = [
+  {
+    folder: 'business_partners', table: 'customers',
+    pk: ['business_partner'],
+    columns: ['business_partner', 'customer', 'category', 'full_name', 'grouping', 'name',
+      'correspondence_lang', 'created_by', 'creation_date', 'creation_time',
+      'first_name', 'form_of_address', 'industry', 'last_change_date', 'last_name',
+      'org_name1', 'org_name2', 'is_blocked', 'is_marked_for_archiving'],
+    jsonKeys: ['businessPartner', 'customer', 'businessPartnerCategory', 'businessPartnerFullName',
+      'businessPartnerGrouping', 'businessPartnerName', 'correspondenceLanguage',
+      'createdByUser', 'creationDate', 'creationTime', 'firstName', 'formOfAddress',
+      'industry', 'lastChangeDate', 'lastName', 'organizationBpName1', 'organizationBpName2',
+      'businessPartnerIsBlocked', 'isMarkedForArchiving'],
+  },
+  {
+    folder: 'business_partner_addresses', table: 'addresses',
+    pk: ['business_partner', 'address_id'],
+    columns: ['business_partner', 'address_id', 'validity_start', 'validity_end', 'address_uuid',
+      'time_zone', 'city', 'country', 'po_box', 'po_box_city', 'po_box_country',
+      'po_box_region', 'po_box_no_number', 'po_box_lobby', 'po_box_postal_code',
+      'postal_code', 'region', 'street', 'tax_jurisdiction', 'transport_zone'],
+    jsonKeys: ['businessPartner', 'addressId', 'validityStartDate', 'validityEndDate', 'addressUuid',
+      'addressTimeZone', 'cityName', 'country', 'poBox', 'poBoxDeviatingCityName',
+      'poBoxDeviatingCountry', 'poBoxDeviatingRegion', 'poBoxIsWithoutNumber', 'poBoxLobbyName',
+      'poBoxPostalCode', 'postalCode', 'region', 'streetName', 'taxJurisdiction', 'transportZone'],
+  },
+  {
+    folder: 'products', table: 'products',
+    pk: ['product'],
+    columns: ['product', 'product_type', 'cross_plant_status', 'cross_plant_status_date',
+      'creation_date', 'created_by', 'last_change_date', 'last_change_datetime',
+      'is_marked_for_deletion', 'product_old_id', 'gross_weight', 'weight_unit',
+      'net_weight', 'product_group', 'base_unit', 'division', 'industry_sector'],
+    jsonKeys: ['product', 'productType', 'crossPlantStatus', 'crossPlantStatusValidityDate',
+      'creationDate', 'createdByUser', 'lastChangeDate', 'lastChangeDateTime',
+      'isMarkedForDeletion', 'productOldId', 'grossWeight', 'weightUnit',
+      'netWeight', 'productGroup', 'baseUnit', 'division', 'industrySector'],
+  },
+  {
+    folder: 'product_descriptions', table: 'product_descriptions',
+    pk: ['product', 'language'],
+    columns: ['product', 'language', 'description'],
+    jsonKeys: ['product', 'language', 'productDescription'],
+  },
+  {
+    folder: 'plants', table: 'plants',
+    pk: ['plant'],
+    columns: ['plant', 'plant_name', 'valuation_area', 'plant_customer', 'plant_supplier',
+      'factory_calendar', 'default_purchasing_org', 'sales_organization', 'address_id',
+      'plant_category', 'distribution_channel', 'division', 'language', 'is_marked_for_archiving'],
+    jsonKeys: ['plant', 'plantName', 'valuationArea', 'plantCustomer', 'plantSupplier',
+      'factoryCalendar', 'defaultPurchasingOrganization', 'salesOrganization', 'addressId',
+      'plantCategory', 'distributionChannel', 'division', 'language', 'isMarkedForArchiving'],
+  },
+  {
+    folder: 'customer_company_assignments', table: 'customer_company_assignments',
+    pk: ['customer', 'company_code'],
+    columns: ['customer', 'company_code', 'accounting_clerk', 'accounting_clerk_fax',
+      'accounting_clerk_email', 'accounting_clerk_phone', 'alternative_payer_account',
+      'payment_blocking_reason', 'payment_methods_list', 'payment_terms',
+      'reconciliation_account', 'deletion_indicator', 'customer_account_group'],
+    jsonKeys: ['customer', 'companyCode', 'accountingClerk', 'accountingClerkFaxNumber',
+      'accountingClerkInternetAddress', 'accountingClerkPhoneNumber', 'alternativePayerAccount',
+      'paymentBlockingReason', 'paymentMethodsList', 'paymentTerms',
+      'reconciliationAccount', 'deletionIndicator', 'customerAccountGroup'],
+  },
+  {
+    folder: 'customer_sales_area_assignments', table: 'customer_sales_area_assignments',
+    pk: ['customer', 'sales_organization', 'distribution_channel', 'division'],
+    columns: ['customer', 'sales_organization', 'distribution_channel', 'division',
+      'billing_blocked', 'complete_delivery_defined', 'credit_control_area', 'currency',
+      'customer_payment_terms', 'delivery_priority', 'incoterms', 'incoterms_location',
+      'sales_group', 'sales_office', 'shipping_condition', 'sls_unlimited_overdelivery',
+      'supplying_plant', 'sales_district', 'exchange_rate_type'],
+    jsonKeys: ['customer', 'salesOrganization', 'distributionChannel', 'division',
+      'billingIsBlockedForCustomer', 'completeDeliveryIsDefined', 'creditControlArea', 'currency',
+      'customerPaymentTerms', 'deliveryPriority', 'incotermsClassification', 'incotermsLocation1',
+      'salesGroup', 'salesOffice', 'shippingCondition', 'slsUnlmtdOvrdelivIsAllwd',
+      'supplyingPlant', 'salesDistrict', 'exchangeRateType'],
+  },
+  {
+    folder: 'sales_order_headers', table: 'sales_orders',
+    pk: ['sales_order'],
+    columns: ['sales_order', 'order_type', 'sales_organization', 'distribution_channel', 'division',
+      'sales_group', 'sales_office', 'sold_to_party', 'creation_date', 'created_by',
+      'last_change_datetime', 'total_net_amount', 'overall_delivery_status',
+      'overall_billing_status', 'overall_ref_status', 'transaction_currency',
+      'pricing_date', 'requested_delivery_date', 'billing_block', 'delivery_block',
+      'incoterms', 'incoterms_location', 'payment_terms', 'credit_check_status'],
+    jsonKeys: ['salesOrder', 'salesOrderType', 'salesOrganization', 'distributionChannel',
+      'organizationDivision', 'salesGroup', 'salesOffice', 'soldToParty', 'creationDate',
+      'createdByUser', 'lastChangeDateTime', 'totalNetAmount', 'overallDeliveryStatus',
+      'overallOrdReltdBillgStatus', 'overallSdDocReferenceStatus', 'transactionCurrency',
+      'pricingDate', 'requestedDeliveryDate', 'headerBillingBlockReason', 'deliveryBlockReason',
+      'incotermsClassification', 'incotermsLocation1', 'customerPaymentTerms', 'totalCreditCheckStatus'],
+  },
+  {
+    folder: 'sales_order_items', table: 'sales_order_items',
+    pk: ['sales_order', 'sales_order_item'],
+    columns: ['sales_order', 'sales_order_item', 'item_category', 'material', 'requested_quantity',
+      'quantity_unit', 'transaction_currency', 'net_amount', 'material_group',
+      'production_plant', 'storage_location', 'rejection_reason', 'billing_block'],
+    jsonKeys: ['salesOrder', 'salesOrderItem', 'salesOrderItemCategory', 'material', 'requestedQuantity',
+      'requestedQuantityUnit', 'transactionCurrency', 'netAmount', 'materialGroup',
+      'productionPlant', 'storageLocation', 'salesDocumentRjcnReason', 'itemBillingBlockReason'],
+  },
+  {
+    folder: 'sales_order_schedule_lines', table: 'sales_order_schedule_lines',
+    pk: ['sales_order', 'sales_order_item', 'schedule_line'],
+    columns: ['sales_order', 'sales_order_item', 'schedule_line',
+      'confirmed_delivery_date', 'order_quantity_unit', 'confirmed_order_qty'],
+    jsonKeys: ['salesOrder', 'salesOrderItem', 'scheduleLine',
+      'confirmedDeliveryDate', 'orderQuantityUnit', 'confdOrderQtyByMatlAvailCheck'],
+  },
+  {
+    folder: 'outbound_delivery_headers', table: 'deliveries',
+    pk: ['delivery_document'],
+    columns: ['delivery_document', 'actual_goods_movement_date', 'actual_goods_movement_time',
+      'creation_date', 'creation_time', 'delivery_block', 'general_incompletion_status',
+      'billing_block', 'last_change_date', 'goods_movement_status', 'picking_status',
+      'proof_of_delivery_status', 'shipping_point'],
+    jsonKeys: ['deliveryDocument', 'actualGoodsMovementDate', 'actualGoodsMovementTime',
+      'creationDate', 'creationTime', 'deliveryBlockReason', 'hdrGeneralIncompletionStatus',
+      'headerBillingBlockReason', 'lastChangeDate', 'overallGoodsMovementStatus',
+      'overallPickingStatus', 'overallProofOfDeliveryStatus', 'shippingPoint'],
+  },
+  {
+    folder: 'outbound_delivery_items', table: 'delivery_items',
+    pk: ['delivery_document', 'delivery_document_item'],
+    columns: ['delivery_document', 'delivery_document_item', 'actual_delivery_quantity', 'batch',
+      'quantity_unit', 'billing_block', 'last_change_date', 'plant',
+      'reference_sd_document', 'reference_sd_document_item', 'storage_location'],
+    jsonKeys: ['deliveryDocument', 'deliveryDocumentItem', 'actualDeliveryQuantity', 'batch',
+      'deliveryQuantityUnit', 'itemBillingBlockReason', 'lastChangeDate', 'plant',
+      'referenceSdDocument', 'referenceSdDocumentItem', 'storageLocation'],
+  },
+  {
+    folder: 'billing_document_headers', table: 'billing_documents',
+    pk: ['billing_document'],
+    columns: ['billing_document', 'billing_type', 'creation_date', 'creation_time',
+      'last_change_datetime', 'billing_date', 'is_cancelled', 'cancelled_billing_doc',
+      'total_net_amount', 'transaction_currency', 'company_code', 'fiscal_year',
+      'accounting_document', 'sold_to_party'],
+    jsonKeys: ['billingDocument', 'billingDocumentType', 'creationDate', 'creationTime',
+      'lastChangeDateTime', 'billingDocumentDate', 'billingDocumentIsCancelled',
+      'cancelledBillingDocument', 'totalNetAmount', 'transactionCurrency',
+      'companyCode', 'fiscalYear', 'accountingDocument', 'soldToParty'],
+  },
+  {
+    folder: 'billing_document_items', table: 'billing_document_items',
+    pk: ['billing_document', 'billing_document_item'],
+    columns: ['billing_document', 'billing_document_item', 'material', 'billing_quantity',
+      'quantity_unit', 'net_amount', 'transaction_currency',
+      'reference_sd_document', 'reference_sd_document_item'],
+    jsonKeys: ['billingDocument', 'billingDocumentItem', 'material', 'billingQuantity',
+      'billingQuantityUnit', 'netAmount', 'transactionCurrency',
+      'referenceSdDocument', 'referenceSdDocumentItem'],
+  },
+  {
+    folder: 'billing_document_cancellations', table: 'billing_document_cancellations',
+    pk: ['billing_document'],
+    columns: ['billing_document', 'billing_type', 'creation_date', 'creation_time',
+      'last_change_datetime', 'billing_date', 'billing_is_cancelled', 'cancelled_billing_doc',
+      'total_net_amount', 'transaction_currency', 'company_code', 'fiscal_year',
+      'accounting_document', 'sold_to_party'],
+    jsonKeys: ['billingDocument', 'billingDocumentType', 'creationDate', 'creationTime',
+      'lastChangeDateTime', 'billingDocumentDate', 'billingDocumentIsCancelled',
+      'cancelledBillingDocument', 'totalNetAmount', 'transactionCurrency',
+      'companyCode', 'fiscalYear', 'accountingDocument', 'soldToParty'],
+  },
+  {
+    folder: 'journal_entry_items_accounts_receivable', table: 'journal_entries',
+    pk: ['company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item'],
+    columns: ['company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item',
+      'gl_account', 'reference_document', 'cost_center', 'profit_center',
+      'transaction_currency', 'amount_in_trans_currency', 'company_code_currency',
+      'amount_in_cc_currency', 'posting_date', 'document_date', 'document_type',
+      'assignment_reference', 'last_change_datetime', 'customer',
+      'financial_account_type', 'clearing_date', 'clearing_document', 'clearing_doc_fiscal_year'],
+    jsonKeys: ['companyCode', 'fiscalYear', 'accountingDocument', 'accountingDocumentItem',
+      'glAccount', 'referenceDocument', 'costCenter', 'profitCenter',
+      'transactionCurrency', 'amountInTransactionCurrency', 'companyCodeCurrency',
+      'amountInCompanyCodeCurrency', 'postingDate', 'documentDate', 'accountingDocumentType',
+      'assignmentReference', 'lastChangeDateTime', 'customer',
+      'financialAccountType', 'clearingDate', 'clearingAccountingDocument', 'clearingDocFiscalYear'],
+  },
+  {
+    folder: 'payments_accounts_receivable', table: 'payments',
+    pk: ['company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item'],
+    columns: ['company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item',
+      'clearing_date', 'clearing_document', 'clearing_doc_fiscal_year',
+      'amount_in_trans_currency', 'transaction_currency',
+      'amount_in_cc_currency', 'company_code_currency', 'customer',
+      'invoice_reference', 'invoice_ref_fiscal_year', 'sales_document', 'sales_document_item',
+      'posting_date', 'document_date', 'assignment_reference', 'gl_account',
+      'financial_account_type', 'profit_center', 'cost_center'],
+    jsonKeys: ['companyCode', 'fiscalYear', 'accountingDocument', 'accountingDocumentItem',
+      'clearingDate', 'clearingAccountingDocument', 'clearingDocFiscalYear',
+      'amountInTransactionCurrency', 'transactionCurrency',
+      'amountInCompanyCodeCurrency', 'companyCodeCurrency', 'customer',
+      'invoiceReference', 'invoiceReferenceFiscalYear', 'salesDocument', 'salesDocumentItem',
+      'postingDate', 'documentDate', 'assignmentReference', 'glAccount',
+      'financialAccountType', 'profitCenter', 'costCenter'],
+  },
+  {
+    folder: 'product_plants', table: 'product_plants',
+    pk: ['product', 'plant'],
+    columns: ['product', 'plant', 'country_of_origin', 'region_of_origin',
+      'production_invtry_managed_loc', 'availability_check_type', 'fiscal_year_variant',
+      'profit_center', 'mrp_type'],
+    jsonKeys: ['product', 'plant', 'countryOfOrigin', 'regionOfOrigin',
+      'productionInvtryManagedLoc', 'availabilityCheckType', 'fiscalYearVariant',
+      'profitCenter', 'mrpType'],
+  },
+  {
+    folder: 'product_storage_locations', table: 'product_storage_locations',
+    pk: ['product', 'plant', 'storage_location'],
+    columns: ['product', 'plant', 'storage_location', 'physical_inventory_block',
+      'date_last_posted_count_unrestricted'],
+    jsonKeys: ['product', 'plant', 'storageLocation', 'physicalInventoryBlockInd',
+      'dateOfLastPostedCntUnRstrcdStk'],
+  },
+];
 
-async function ingestAddresses() {
-  const rows = readJSONLParts('business_partner_addresses');
-  const columns = [
-    'business_partner', 'address_id', 'validity_start', 'validity_end', 'address_uuid',
-    'time_zone', 'city', 'country', 'po_box', 'po_box_city', 'po_box_country',
-    'po_box_region', 'po_box_no_number', 'po_box_lobby', 'po_box_postal_code',
-    'postal_code', 'region', 'street', 'tax_jurisdiction', 'transport_zone'
-  ];
-  const jsonKeys = [
-    'businessPartner', 'addressId', 'validityStartDate', 'validityEndDate', 'addressUuid',
-    'addressTimeZone', 'cityName', 'country', 'poBox', 'poBoxDeviatingCityName',
-    'poBoxDeviatingCountry', 'poBoxDeviatingRegion', 'poBoxIsWithoutNumber', 'poBoxLobbyName',
-    'poBoxPostalCode', 'postalCode', 'region', 'streetName', 'taxJurisdiction', 'transportZone'
-  ];
-  return batchUpsert('addresses', columns, jsonKeys, ['business_partner', 'address_id'], rows);
-}
-
-async function ingestProducts() {
-  const rows = readJSONLParts('products');
-  const columns = [
-    'product', 'product_type', 'cross_plant_status', 'cross_plant_status_date',
-    'creation_date', 'created_by', 'last_change_date', 'last_change_datetime',
-    'is_marked_for_deletion', 'product_old_id', 'gross_weight', 'weight_unit',
-    'net_weight', 'product_group', 'base_unit', 'division', 'industry_sector'
-  ];
-  const jsonKeys = [
-    'product', 'productType', 'crossPlantStatus', 'crossPlantStatusValidityDate',
-    'creationDate', 'createdByUser', 'lastChangeDate', 'lastChangeDateTime',
-    'isMarkedForDeletion', 'productOldId', 'grossWeight', 'weightUnit',
-    'netWeight', 'productGroup', 'baseUnit', 'division', 'industrySector'
-  ];
-  return batchUpsert('products', columns, jsonKeys, ['product'], rows);
-}
-
-async function ingestProductDescriptions() {
-  const rows = readJSONLParts('product_descriptions');
-  const columns = ['product', 'language', 'description'];
-  const jsonKeys = ['product', 'language', 'productDescription'];
-  return batchUpsert('product_descriptions', columns, jsonKeys, ['product', 'language'], rows);
-}
-
-async function ingestPlants() {
-  const rows = readJSONLParts('plants');
-  const columns = [
-    'plant', 'plant_name', 'valuation_area', 'plant_customer', 'plant_supplier',
-    'factory_calendar', 'default_purchasing_org', 'sales_organization', 'address_id',
-    'plant_category', 'distribution_channel', 'division', 'language', 'is_marked_for_archiving'
-  ];
-  const jsonKeys = [
-    'plant', 'plantName', 'valuationArea', 'plantCustomer', 'plantSupplier',
-    'factoryCalendar', 'defaultPurchasingOrganization', 'salesOrganization', 'addressId',
-    'plantCategory', 'distributionChannel', 'division', 'language', 'isMarkedForArchiving'
-  ];
-  return batchUpsert('plants', columns, jsonKeys, ['plant'], rows);
-}
-
-async function ingestSalesOrders() {
-  const rows = readJSONLParts('sales_order_headers');
-  const columns = [
-    'sales_order', 'order_type', 'sales_organization', 'distribution_channel', 'division',
-    'sales_group', 'sales_office', 'sold_to_party', 'creation_date', 'created_by',
-    'last_change_datetime', 'total_net_amount', 'overall_delivery_status',
-    'overall_billing_status', 'overall_ref_status', 'transaction_currency',
-    'pricing_date', 'requested_delivery_date', 'billing_block', 'delivery_block',
-    'incoterms', 'incoterms_location', 'payment_terms', 'credit_check_status'
-  ];
-  const jsonKeys = [
-    'salesOrder', 'salesOrderType', 'salesOrganization', 'distributionChannel',
-    'organizationDivision', 'salesGroup', 'salesOffice', 'soldToParty', 'creationDate',
-    'createdByUser', 'lastChangeDateTime', 'totalNetAmount', 'overallDeliveryStatus',
-    'overallOrdReltdBillgStatus', 'overallSdDocReferenceStatus', 'transactionCurrency',
-    'pricingDate', 'requestedDeliveryDate', 'headerBillingBlockReason', 'deliveryBlockReason',
-    'incotermsClassification', 'incotermsLocation1', 'customerPaymentTerms', 'totalCreditCheckStatus'
-  ];
-  return batchUpsert('sales_orders', columns, jsonKeys, ['sales_order'], rows);
-}
-
-async function ingestSalesOrderItems() {
-  const rows = readJSONLParts('sales_order_items');
-  const columns = [
-    'sales_order', 'sales_order_item', 'item_category', 'material', 'requested_quantity',
-    'quantity_unit', 'transaction_currency', 'net_amount', 'material_group',
-    'production_plant', 'storage_location', 'rejection_reason', 'billing_block'
-  ];
-  const jsonKeys = [
-    'salesOrder', 'salesOrderItem', 'salesOrderItemCategory', 'material', 'requestedQuantity',
-    'requestedQuantityUnit', 'transactionCurrency', 'netAmount', 'materialGroup',
-    'productionPlant', 'storageLocation', 'salesDocumentRjcnReason', 'itemBillingBlockReason'
-  ];
-  return batchUpsert('sales_order_items', columns, jsonKeys, ['sales_order', 'sales_order_item'], rows);
-}
-
-async function ingestDeliveries() {
-  const rows = readJSONLParts('outbound_delivery_headers');
-  const columns = [
-    'delivery_document', 'actual_goods_movement_date', 'actual_goods_movement_time',
-    'creation_date', 'creation_time', 'delivery_block', 'general_incompletion_status',
-    'billing_block', 'last_change_date', 'goods_movement_status', 'picking_status',
-    'proof_of_delivery_status', 'shipping_point'
-  ];
-  const jsonKeys = [
-    'deliveryDocument', 'actualGoodsMovementDate', 'actualGoodsMovementTime',
-    'creationDate', 'creationTime', 'deliveryBlockReason', 'hdrGeneralIncompletionStatus',
-    'headerBillingBlockReason', 'lastChangeDate', 'overallGoodsMovementStatus',
-    'overallPickingStatus', 'overallProofOfDeliveryStatus', 'shippingPoint'
-  ];
-  return batchUpsert('deliveries', columns, jsonKeys, ['delivery_document'], rows);
-}
-
-async function ingestDeliveryItems() {
-  const rows = readJSONLParts('outbound_delivery_items');
-  const columns = [
-    'delivery_document', 'delivery_document_item', 'actual_delivery_quantity', 'batch',
-    'quantity_unit', 'billing_block', 'last_change_date', 'plant',
-    'reference_sd_document', 'reference_sd_document_item', 'storage_location'
-  ];
-  const jsonKeys = [
-    'deliveryDocument', 'deliveryDocumentItem', 'actualDeliveryQuantity', 'batch',
-    'deliveryQuantityUnit', 'itemBillingBlockReason', 'lastChangeDate', 'plant',
-    'referenceSdDocument', 'referenceSdDocumentItem', 'storageLocation'
-  ];
-  return batchUpsert('delivery_items', columns, jsonKeys, ['delivery_document', 'delivery_document_item'], rows);
-}
-
-async function ingestBillingDocuments() {
-  const rows = readJSONLParts('billing_document_headers');
-  const columns = [
-    'billing_document', 'billing_type', 'creation_date', 'creation_time',
-    'last_change_datetime', 'billing_date', 'is_cancelled', 'cancelled_billing_doc',
-    'total_net_amount', 'transaction_currency', 'company_code', 'fiscal_year',
-    'accounting_document', 'sold_to_party'
-  ];
-  const jsonKeys = [
-    'billingDocument', 'billingDocumentType', 'creationDate', 'creationTime',
-    'lastChangeDateTime', 'billingDocumentDate', 'billingDocumentIsCancelled',
-    'cancelledBillingDocument', 'totalNetAmount', 'transactionCurrency',
-    'companyCode', 'fiscalYear', 'accountingDocument', 'soldToParty'
-  ];
-  return batchUpsert('billing_documents', columns, jsonKeys, ['billing_document'], rows);
-}
-
-async function ingestBillingDocumentItems() {
-  const rows = readJSONLParts('billing_document_items');
-  const columns = [
-    'billing_document', 'billing_document_item', 'material', 'billing_quantity',
-    'quantity_unit', 'net_amount', 'transaction_currency',
-    'reference_sd_document', 'reference_sd_document_item'
-  ];
-  const jsonKeys = [
-    'billingDocument', 'billingDocumentItem', 'material', 'billingQuantity',
-    'billingQuantityUnit', 'netAmount', 'transactionCurrency',
-    'referenceSdDocument', 'referenceSdDocumentItem'
-  ];
-  return batchUpsert('billing_document_items', columns, jsonKeys, ['billing_document', 'billing_document_item'], rows);
-}
-
-async function ingestJournalEntries() {
-  const rows = readJSONLParts('journal_entry_items_accounts_receivable');
-  const columns = [
-    'company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item',
-    'gl_account', 'reference_document', 'cost_center', 'profit_center',
-    'transaction_currency', 'amount_in_trans_currency', 'company_code_currency',
-    'amount_in_cc_currency', 'posting_date', 'document_date', 'document_type',
-    'assignment_reference', 'last_change_datetime', 'customer',
-    'financial_account_type', 'clearing_date', 'clearing_document', 'clearing_doc_fiscal_year'
-  ];
-  const jsonKeys = [
-    'companyCode', 'fiscalYear', 'accountingDocument', 'accountingDocumentItem',
-    'glAccount', 'referenceDocument', 'costCenter', 'profitCenter',
-    'transactionCurrency', 'amountInTransactionCurrency', 'companyCodeCurrency',
-    'amountInCompanyCodeCurrency', 'postingDate', 'documentDate', 'accountingDocumentType',
-    'assignmentReference', 'lastChangeDateTime', 'customer',
-    'financialAccountType', 'clearingDate', 'clearingAccountingDocument', 'clearingDocFiscalYear'
-  ];
-  return batchUpsert('journal_entries', columns, jsonKeys,
-    ['company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item'], rows);
-}
-
-async function ingestPayments() {
-  const rows = readJSONLParts('payments_accounts_receivable');
-  const columns = [
-    'company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item',
-    'clearing_date', 'clearing_document', 'clearing_doc_fiscal_year',
-    'amount_in_trans_currency', 'transaction_currency',
-    'amount_in_cc_currency', 'company_code_currency', 'customer',
-    'invoice_reference', 'invoice_ref_fiscal_year', 'sales_document', 'sales_document_item',
-    'posting_date', 'document_date', 'assignment_reference', 'gl_account',
-    'financial_account_type', 'profit_center', 'cost_center'
-  ];
-  const jsonKeys = [
-    'companyCode', 'fiscalYear', 'accountingDocument', 'accountingDocumentItem',
-    'clearingDate', 'clearingAccountingDocument', 'clearingDocFiscalYear',
-    'amountInTransactionCurrency', 'transactionCurrency',
-    'amountInCompanyCodeCurrency', 'companyCodeCurrency', 'customer',
-    'invoiceReference', 'invoiceReferenceFiscalYear', 'salesDocument', 'salesDocumentItem',
-    'postingDate', 'documentDate', 'assignmentReference', 'glAccount',
-    'financialAccountType', 'profitCenter', 'costCenter'
-  ];
-  return batchUpsert('payments', columns, jsonKeys,
-    ['company_code', 'fiscal_year', 'accounting_document', 'accounting_document_item'], rows);
-}
-
-async function ingestBillingDocumentCancellations() {
-  const rows = readJSONLParts('billing_document_cancellations');
-  const columns = [
-    'billing_document', 'billing_type', 'creation_date', 'creation_time',
-    'last_change_datetime', 'billing_date', 'billing_is_cancelled', 'cancelled_billing_doc',
-    'total_net_amount', 'transaction_currency', 'company_code', 'fiscal_year',
-    'accounting_document', 'sold_to_party',
-  ];
-  const jsonKeys = [
-    'billingDocument', 'billingDocumentType', 'creationDate', 'creationTime',
-    'lastChangeDateTime', 'billingDocumentDate', 'billingDocumentIsCancelled',
-    'cancelledBillingDocument', 'totalNetAmount', 'transactionCurrency',
-    'companyCode', 'fiscalYear', 'accountingDocument', 'soldToParty',
-  ];
-  return batchUpsert('billing_document_cancellations', columns, jsonKeys, ['billing_document'], rows);
-}
-
-async function ingestCustomerCompanyAssignments() {
-  const rows = readJSONLParts('customer_company_assignments');
-  const columns = [
-    'customer', 'company_code', 'accounting_clerk', 'accounting_clerk_fax',
-    'accounting_clerk_email', 'accounting_clerk_phone', 'alternative_payer_account',
-    'payment_blocking_reason', 'payment_methods_list', 'payment_terms',
-    'reconciliation_account', 'deletion_indicator', 'customer_account_group',
-  ];
-  const jsonKeys = [
-    'customer', 'companyCode', 'accountingClerk', 'accountingClerkFaxNumber',
-    'accountingClerkInternetAddress', 'accountingClerkPhoneNumber', 'alternativePayerAccount',
-    'paymentBlockingReason', 'paymentMethodsList', 'paymentTerms',
-    'reconciliationAccount', 'deletionIndicator', 'customerAccountGroup',
-  ];
-  return batchUpsert('customer_company_assignments', columns, jsonKeys, ['customer', 'company_code'], rows);
-}
-
-async function ingestCustomerSalesAreaAssignments() {
-  const rows = readJSONLParts('customer_sales_area_assignments');
-  const columns = [
-    'customer', 'sales_organization', 'distribution_channel', 'division',
-    'billing_blocked', 'complete_delivery_defined', 'credit_control_area', 'currency',
-    'customer_payment_terms', 'delivery_priority', 'incoterms', 'incoterms_location',
-    'sales_group', 'sales_office', 'shipping_condition', 'sls_unlimited_overdelivery',
-    'supplying_plant', 'sales_district', 'exchange_rate_type',
-  ];
-  const jsonKeys = [
-    'customer', 'salesOrganization', 'distributionChannel', 'division',
-    'billingIsBlockedForCustomer', 'completeDeliveryIsDefined', 'creditControlArea', 'currency',
-    'customerPaymentTerms', 'deliveryPriority', 'incotermsClassification', 'incotermsLocation1',
-    'salesGroup', 'salesOffice', 'shippingCondition', 'slsUnlmtdOvrdelivIsAllwd',
-    'supplyingPlant', 'salesDistrict', 'exchangeRateType',
-  ];
-  return batchUpsert(
-    'customer_sales_area_assignments',
-    columns,
-    jsonKeys,
-    ['customer', 'sales_organization', 'distribution_channel', 'division'],
-    rows
-  );
-}
-
-async function ingestSalesOrderScheduleLines() {
-  const rows = readJSONLParts('sales_order_schedule_lines');
-  const columns = [
-    'sales_order', 'sales_order_item', 'schedule_line',
-    'confirmed_delivery_date', 'order_quantity_unit', 'confirmed_order_qty',
-  ];
-  const jsonKeys = [
-    'salesOrder', 'salesOrderItem', 'scheduleLine',
-    'confirmedDeliveryDate', 'orderQuantityUnit', 'confdOrderQtyByMatlAvailCheck',
-  ];
-  return batchUpsert(
-    'sales_order_schedule_lines',
-    columns,
-    jsonKeys,
-    ['sales_order', 'sales_order_item', 'schedule_line'],
-    rows
-  );
-}
-
-async function ingestProductPlants() {
-  const rows = readJSONLParts('product_plants');
-  const columns = [
-    'product', 'plant', 'country_of_origin', 'region_of_origin',
-    'production_invtry_managed_loc', 'availability_check_type', 'fiscal_year_variant',
-    'profit_center', 'mrp_type',
-  ];
-  const jsonKeys = [
-    'product', 'plant', 'countryOfOrigin', 'regionOfOrigin',
-    'productionInvtryManagedLoc', 'availabilityCheckType', 'fiscalYearVariant',
-    'profitCenter', 'mrpType',
-  ];
-  return batchUpsert('product_plants', columns, jsonKeys, ['product', 'plant'], rows);
-}
-
-async function ingestProductStorageLocations() {
-  const rows = readJSONLParts('product_storage_locations');
-  const columns = [
-    'product', 'plant', 'storage_location', 'physical_inventory_block',
-    'date_last_posted_count_unrestricted',
-  ];
-  const jsonKeys = [
-    'product', 'plant', 'storageLocation', 'physicalInventoryBlockInd',
-    'dateOfLastPostedCntUnRstrcdStk',
-  ];
-  return batchUpsert(
-    'product_storage_locations',
-    columns,
-    jsonKeys,
-    ['product', 'plant', 'storage_location'],
-    rows
-  );
+/** Generic ingest function — reads JSONL parts and batch-upserts into the target table */
+async function ingestTable({ folder, table, columns, jsonKeys, pk }) {
+  const rows = readJSONLParts(folder);
+  return batchUpsert(table, columns, jsonKeys, pk, rows);
 }
 
 // ── Main ───────────────────────────────────────────────────────
@@ -526,38 +425,16 @@ async function main() {
   }
   console.log('Schema applied\n');
 
-  // Ingest in dependency order
-  const steps = [
-    ['customers', ingestCustomers],
-    ['addresses', ingestAddresses],
-    ['products', ingestProducts],
-    ['product_descriptions', ingestProductDescriptions],
-    ['plants', ingestPlants],
-    ['customer_company_assignments', ingestCustomerCompanyAssignments],
-    ['customer_sales_area_assignments', ingestCustomerSalesAreaAssignments],
-    ['sales_orders', ingestSalesOrders],
-    ['sales_order_items', ingestSalesOrderItems],
-    ['sales_order_schedule_lines', ingestSalesOrderScheduleLines],
-    ['deliveries', ingestDeliveries],
-    ['delivery_items', ingestDeliveryItems],
-    ['billing_documents', ingestBillingDocuments],
-    ['billing_document_items', ingestBillingDocumentItems],
-    ['billing_document_cancellations', ingestBillingDocumentCancellations],
-    ['journal_entries', ingestJournalEntries],
-    ['payments', ingestPayments],
-    ['product_plants', ingestProductPlants],
-    ['product_storage_locations', ingestProductStorageLocations],
-  ];
-
+  // Ingest all tables in config order (dependency-safe order)
   const results = {};
-  for (const [name, fn] of steps) {
+  for (const config of TABLE_CONFIGS) {
     try {
-      const count = await fn();
-      results[name] = count;
-      console.log(`${name}: ${count} rows`);
+      const count = await ingestTable(config);
+      results[config.table] = count;
+      console.log(`${config.table}: ${count} rows`);
     } catch (err) {
-      console.error(`${name}: ${err.message}`);
-      results[name] = `ERROR: ${err.message}`;
+      console.error(`${config.table}: ${err.message}`);
+      results[config.table] = `ERROR: ${err.message}`;
     }
   }
 

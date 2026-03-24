@@ -135,12 +135,16 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
 
   // Expand node — fetch neighbors and merge
   const expandNode = useCallback(async (nodeId) => {
+    const clearStatus = (msg) => {
+      setExpandStatus(msg);
+      setTimeout(() => setExpandStatus(null), 2000);
+    };
+
     setExpandStatus('loading');
     try {
       const res = await fetch(`/api/node/${encodeURIComponent(nodeId)}`);
       if (!res.ok) {
-        setExpandStatus('error');
-        setTimeout(() => setExpandStatus(null), 2000);
+        clearStatus('error');
         return;
       }
       const expansion = await res.json();
@@ -157,13 +161,7 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
           return !existingLinks.has(key);
         });
         
-        if (newNodes.length === 0) {
-          setExpandStatus('no-new');
-          setTimeout(() => setExpandStatus(null), 2000);
-        } else {
-          setExpandStatus(`added ${newNodes.length} nodes`);
-          setTimeout(() => setExpandStatus(null), 2000);
-        }
+        clearStatus(newNodes.length === 0 ? 'no-new' : `added ${newNodes.length} nodes`);
         
         return {
           nodes: [...prev.nodes, ...newNodes],
@@ -172,8 +170,7 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
       });
     } catch (err) {
       console.error('Expand error:', err);
-      setExpandStatus('error');
-      setTimeout(() => setExpandStatus(null), 2000);
+      clearStatus('error');
     }
   }, []);
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import sql, { isMissingSchemaError } from '@/lib/db';
-import { buildGraph } from '@/lib/graphBuilder';
+import { buildGraph, getNodeNeighbors } from '@/lib/graphBuilder';
 import { OVERVIEW_MAX_PRODUCT_STORAGE_LOCS } from '@/lib/graphLimits';
 
 export async function GET(request) {
@@ -13,91 +13,13 @@ export async function GET(request) {
     let data = {};
 
     if (seed && seedType) {
-      // Strategy B: seed-based neighborhood loading
-      switch (seedType) {
-        case 'sales_order': {
-          data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ${seed}`;
-          const so = data.salesOrders[0];
-          if (so) {
-            data.customers = await sql`SELECT * FROM customers WHERE business_partner = ${so.sold_to_party}`;
-            data.salesOrderItems = await sql`SELECT * FROM sales_order_items WHERE sales_order = ${seed}`;
-            data.deliveryItems = await sql`SELECT * FROM delivery_items WHERE reference_sd_document = ${seed}`;
-            const dIds = [...new Set(data.deliveryItems.map(di => di.delivery_document))];
-            if (dIds.length) data.deliveries = await sql`SELECT * FROM deliveries WHERE delivery_document = ANY(${dIds})`;
-            // billing_items.reference_sd_document points to delivery, not SO - need to use delivery IDs
-            if (dIds.length) {
-              data.billingItems = await sql`SELECT * FROM billing_document_items WHERE reference_sd_document = ANY(${dIds})`;
-              const bIds = [...new Set(data.billingItems.map(bi => bi.billing_document))];
-              if (bIds.length) {
-                data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ANY(${bIds})`;
-              }
-            }
-            if (depth >= 2) {
-              for (const bd of data.billingDocuments) {
-                if (bd.accounting_document) {
-                  const jes = await sql`SELECT * FROM journal_entries WHERE company_code = ${bd.company_code} AND fiscal_year = ${bd.fiscal_year} AND accounting_document = ${bd.accounting_document}`;
-                  data.journalEntries = [...(data.journalEntries || []), ...jes];
-                }
-              }
-            }
-            const mats = [...new Set(data.salesOrderItems.map(i => i.material).filter(Boolean))];
-            if (mats.length) {
-              data.products = await sql`SELECT p.*, pd.description FROM products p LEFT JOIN product_descriptions pd ON p.product = pd.product AND pd.language = 'EN' WHERE p.product = ANY(${mats})`;
-              data.productPlants = await sql`SELECT * FROM product_plants WHERE product = ANY(${mats})`;
-              data.productStorageLocations =
-                await sql`SELECT * FROM product_storage_locations WHERE product = ANY(${mats}) LIMIT ${OVERVIEW_MAX_PRODUCT_STORAGE_LOCS}`;
-              const plantIds = [
-                ...new Set([
-                  ...(data.productPlants || []).map((p) => p.plant),
-                  ...(data.productStorageLocations || []).map((p) => p.plant),
-                ]),
-              ].filter(Boolean);
-              if (plantIds.length) {
-                data.plants = await sql`SELECT * FROM plants WHERE plant = ANY(${plantIds})`;
-              }
-            }
-            data.salesOrderScheduleLines =
-              await sql`SELECT * FROM sales_order_schedule_lines WHERE sales_order = ${seed}`;
-          }
-          break;
-        }
-        case 'customer': {
-          data.customers = await sql`SELECT * FROM customers WHERE business_partner = ${seed}`;
-          data.addresses = await sql`SELECT * FROM addresses WHERE business_partner = ${seed}`;
-          data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sold_to_party = ${seed} LIMIT 10`;
-          data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE sold_to_party = ${seed} LIMIT 10`;
-          data.customerCompanyAssignments =
-            await sql`SELECT * FROM customer_company_assignments WHERE customer = ${seed}`;
-          data.customerSalesAreaAssignments =
-            await sql`SELECT * FROM customer_sales_area_assignments WHERE customer = ${seed}`;
-          break;
-        }
-        case 'billing': {
-          data.billingDocuments = await sql`SELECT * FROM billing_documents WHERE billing_document = ${seed}`;
-          data.billingItems = await sql`SELECT * FROM billing_document_items WHERE billing_document = ${seed}`;
-          data.billingDocumentCancellations = await sql`
-            SELECT * FROM billing_document_cancellations
-            WHERE billing_document = ${seed} OR cancelled_billing_doc = ${seed}
-            LIMIT 25`;
-          const bd = data.billingDocuments[0];
-          if (bd) {
-            if (bd.sold_to_party) data.customers = await sql`SELECT * FROM customers WHERE business_partner = ${bd.sold_to_party}`;
-            if (bd.accounting_document) {
-              data.journalEntries = await sql`SELECT * FROM journal_entries WHERE company_code = ${bd.company_code} AND fiscal_year = ${bd.fiscal_year} AND accounting_document = ${bd.accounting_document}`;
-            }
-            // billing_items.reference_sd_document = delivery_document, need to get sales_order via delivery_items
-            const deliveryIds = [...new Set(data.billingItems.map(bi => bi.reference_sd_document).filter(Boolean))];
-            if (deliveryIds.length) {
-              const diRows = await sql`SELECT DISTINCT reference_sd_document FROM delivery_items WHERE delivery_document = ANY(${deliveryIds})`;
-              const soIds = diRows.map(r => r.reference_sd_document).filter(Boolean);
-              if (soIds.length) data.salesOrders = await sql`SELECT * FROM sales_orders WHERE sales_order = ANY(${soIds})`;
-            }
-          }
-          break;
-        }
-        default:
-          return NextResponse.json({ error: `Unknown seed type: ${seedType}` }, { status: 400 });
+      // Seed-based neighborhood — delegate to graphBuilder
+      const supportedSeedTypes = ['sales_order', 'customer', 'billing'];
+      if (!supportedSeedTypes.includes(seedType)) {
+        return NextResponse.json({ error: `Unknown seed type: ${seedType}` }, { status: 400 });
       }
+      const graph = await getNodeNeighbors(seed, seedType);
+      return NextResponse.json(graph);
     } else {
       // Optimized: Load sample of entities for fast initial render, expand on demand
       data.customers = await sql`SELECT * FROM customers`;

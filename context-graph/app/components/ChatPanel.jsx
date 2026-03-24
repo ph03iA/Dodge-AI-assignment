@@ -251,16 +251,22 @@ const SQLToggle = memo(function SQLToggle({ sql }) {
   );
 });
 
+const NODE_ID_FIELDS = {
+  sales_order: 'sales_order',
+  billing_document: 'billing',
+  delivery_document: 'delivery',
+  business_partner: 'customer',
+  customer: 'customer',
+  product: 'product',
+  material: 'product',
+};
+
 function extractNodeIds(results) {
   const ids = new Set();
   for (const row of results) {
-    if (row.sales_order) ids.add(`sales_order:${row.sales_order}`);
-    if (row.billing_document) ids.add(`billing:${row.billing_document}`);
-    if (row.delivery_document) ids.add(`delivery:${row.delivery_document}`);
-    if (row.business_partner) ids.add(`customer:${row.business_partner}`);
-    if (row.customer) ids.add(`customer:${row.customer}`);
-    if (row.product) ids.add(`product:${row.product}`);
-    if (row.material) ids.add(`product:${row.material}`);
+    for (const [field, prefix] of Object.entries(NODE_ID_FIELDS)) {
+      if (row[field]) ids.add(`${prefix}:${row[field]}`);
+    }
   }
   return Array.from(ids);
 }
