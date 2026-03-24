@@ -20,14 +20,14 @@
 
 ## Optional / Enrichment Tables
 
-| Source Folder | Rows | Notes |
-|---|---|---|
-| `sales_order_schedule_lines` | 179 | FK to sales_order_items |
-| `billing_document_cancellations` | 80 | Subset of billing headers |
-| `customer_company_assignments` | 8 | Company-level customer config |
-| `customer_sales_area_assignments` | 28 | Sales area config |
-| `product_plants` | 3,036 | Product–plant links |
-| `product_storage_locations` | 16,723 | Storage location data |
+| Source Folder | Files | Rows | Notes |
+|---|---|---|---|
+| `sales_order_schedule_lines` | 2 | 179 | FK to sales_order_items |
+| `billing_document_cancellations` | 1 | 80 | Subset of billing headers |
+| `customer_company_assignments` | 1 | 8 | Company-level customer config |
+| `customer_sales_area_assignments` | 1 | 28 | Sales area config |
+| `product_plants` | 4 | 3,036 | Product–plant links |
+| `product_storage_locations` | 18 | 16,723 | Storage location data |
 
 ## O2C Chain — Join Keys
 
@@ -46,11 +46,11 @@ Outbound Delivery (deliveryDocument)
     ▼
 Delivery Item (deliveryDocument + deliveryDocumentItem) ← referenceSdDocument → Sales Order
     │
-    ▼ referenceSdDocument / referenceSdDocumentItem  
+    ▼ (billing lines reference the *delivery*, not the SO)
 Billing Document (billingDocument) ← soldToParty → Customer
-    │                               ← accountingDocument → Journal Entry
+    │                               ← companyCode + fiscalYear + accountingDocument → Journal Entry
     ▼
-Billing Document Item (billingDocument + billingDocumentItem) ← referenceSdDocument → Sales Order
+Billing Document Item (billingDocument + billingDocumentItem) ← referenceSdDocument → **Outbound delivery** (same id as deliveryDocument; not the sales order)
     │
     ▼ companyCode + fiscalYear + accountingDocument
 Journal Entry (companyCode + fiscalYear + accountingDocument + item) ← customer → Customer

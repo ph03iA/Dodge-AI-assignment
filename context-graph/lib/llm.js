@@ -311,12 +311,12 @@ Rules:
    ORDER BY so.creation_date DESC
    LIMIT 50
 
-9. INCOMPLETE FLOWS - Billed without delivery: Find deliveries that have billing but the sales order has no delivery record. Since billing references deliveries, check for billing items whose delivery has no matching sales order:
-   SELECT DISTINCT bd.billing_document, bd.total_net_amount, bd.creation_date, bdi.reference_sd_document AS delivery_doc, 'billed_delivery_no_order' AS status
+9. DATA QUALITY - Billing items pointing at a missing delivery: billing_document_items.reference_sd_document should equal deliveries.delivery_document. Find billings whose line references a delivery id with no rows in delivery_items (orphan SD reference):
+   SELECT DISTINCT bd.billing_document, bd.total_net_amount, bd.creation_date, bdi.reference_sd_document AS delivery_doc, 'billing_ref_missing_delivery' AS status
    FROM billing_documents bd
    INNER JOIN billing_document_items bdi ON bdi.billing_document = bd.billing_document
-   LEFT JOIN delivery_items di ON di.delivery_document = bdi.reference_sd_document AND di.reference_sd_document IS NOT NULL
-   WHERE di.delivery_document IS NULL
+   LEFT JOIN delivery_items di ON di.delivery_document = bdi.reference_sd_document
+   WHERE bdi.reference_sd_document IS NOT NULL AND di.delivery_document IS NULL
    ORDER BY bd.creation_date DESC
    LIMIT 50
 10. Use LEFT JOINs / NOT EXISTS / IS NULL for missing links; prefer NOT EXISTS when comparing existence across fact tables.
@@ -333,13 +333,20 @@ Rules:
 14. Top customers by billing amount: JOIN billing_documents.sold_to_party → customers.business_partner. SUM(billing_documents.total_net_amount) GROUP BY customer name. ORDER BY total DESC LIMIT 10-20.
 15. Customers with uncleared payments: Check journal_entries (not payments) where clearing_date IS NULL or clearing_document IS NULL to find unpaid open items. JOIN customers. Include customer name, accounting_document, and amount.
 16. Cancelled billing documents: FROM billing_document_cancellations. JOIN billing_documents on cancelled_billing_doc. Return cancellation date, original billing doc, amount, and customer.
-17. Journal entries for accounting document: FROM journal_entries WHERE company_code = X AND fiscal_year = Y AND accounting_document = Z. Include amount_in_trans_currency, gl_account. If the user does not specify a document number, simply return 50 recent journal_entries.
+17. Journal entries — REQUIRES real values, never placeholders: Primary key is (company_code, fiscal_year, accounting_document, accounting_document_item). To filter all lines of one FI document use WHERE company_code = 'ABCD' AND fiscal_year = '2025' AND accounting_document = '9400000205' with REAL strings from the user message. NEVER use 'X','Y','Z','specific', or English words as literals. If the user does NOT give company code AND fiscal year AND accounting document, run: SELECT * FROM journal_entries ORDER BY posting_date DESC NULLS LAST LIMIT 50 (so they still see sample rows). Include gl_account, amount_in_trans_currency, accounting_document_item, customer in SELECT when listing lines.
 18. Products with highest order quantity: FROM sales_order_items. SUM(requested_quantity) GROUP BY material. JOIN products and product_descriptions for names. ORDER BY total_quantity DESC LIMIT 20.
-19. Deliveries pending goods movement: FROM deliveries WHERE overall_goods_movement_status = 'A' (or similar pending status). Include delivery_document, creation_date, shipping_point.
+19. Deliveries pending goods movement: column is goods_movement_status (NOT overall_goods_movement_status). Example: FROM deliveries WHERE goods_movement_status = 'A'. Include delivery_document, creation_date, shipping_point.
 20. Customers with orders but no deliveries: FROM sales_orders so LEFT JOIN delivery_items di ON di.reference_sd_document = so.sales_order WHERE di.delivery_document IS NULL. Include customer info via so.sold_to_party → customers.
 21. Average order value by distribution channel: FROM sales_orders. AVG(total_net_amount) GROUP BY distribution_channel. ORDER BY avg DESC.
 22. Plants with most delivery activity: FROM delivery_items. COUNT(DISTINCT delivery_document) GROUP BY plant. JOIN plants for plant_name. ORDER BY count DESC LIMIT 20.
 23. Rejected sales order items: FROM sales_order_items WHERE sales_order IS NOT NULL AND rejection_reason IS NOT NULL AND rejection_reason != ''. Include sales_order, sales_order_item, material, rejection_reason.
+24. "Sales orders billed but no matching delivery": In this schema, billing lines point at **delivery documents** (billing_document_items.reference_sd_document = deliveries.delivery_document), and deliveries tie to **sales orders** (delivery_items.reference_sd_document = sales_orders.sales_order). There is no billing→SO shortcut. Any sales order that is invoiced on this path necessarily has at least one delivery_items row. So **zero rows is a normal, correct answer** for strict "billed SO with no delivery line". Use this query to prove the check (same as listing SOs that participate in delivery→billing; add a note in your mental model that the complement is empty):
+   SELECT DISTINCT so.sales_order, so.sold_to_party, so.creation_date
+   FROM sales_orders so
+   INNER JOIN delivery_items di ON di.reference_sd_document = so.sales_order
+   INNER JOIN billing_document_items bdi ON bdi.reference_sd_document = di.delivery_document
+   LIMIT 50
+   For **billing lines that reference a missing delivery** (data-quality), use rule 9 instead.
 
 Example trace query (output SQL only, no prose; use the billing document number from the user's message in WHERE):
 SELECT bd.billing_document, bdi.reference_sd_document AS delivery_doc, di.reference_sd_document AS sales_order, d.creation_date AS delivery_date, bd.company_code, bd.fiscal_year, bd.accounting_document, je.accounting_document_item, je.amount_in_trans_currency
@@ -391,19 +398,67 @@ export function sanitizeSQL(rawSQL) {
   return sql;
 }
 
-// ── Synthesize answer ──────────────────────────────────────────
-export async function synthesizeAnswer(message, results) {
-  if (!results || results.length === 0) {
-    return 'No matching data was found for your query.';
+/** Neon `sql.query()` usually returns an array of row objects; normalize if a driver returns `{ rows }`. */
+export function normalizeSqlQueryRows(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw.rows)) return raw.rows;
+  return [];
+}
+
+/** When SELECT returns 0 rows, explain common user/LLM mistakes (no extra model call). */
+export function explainEmptyQueryResult(message, executedSql) {
+  const m = (message || '').toLowerCase();
+  const sqlLower = (executedSql || '').toLowerCase();
+
+  if (/journal|accounting\s*document|ledger|fi\s+document|posting|gl\s+account/i.test(m)) {
+    const hasDocNumber = /\b\d{6,12}\b/.test(message || '');
+    const hasCompany = /\b[A-Z]{2,6}\b/.test(message || '');
+    if (
+      !hasDocNumber ||
+      /'specific'|"specific"|=\s*'x'|=\s*"x"|=\s*'y'|where\s+1\s*=\s*0/i.test(sqlLower)
+    ) {
+      return (
+        'No rows matched the query that was generated. ' +
+        'Journal lines are keyed by **company_code**, **fiscal_year**, and **accounting_document** (plus line **accounting_document_item**). ' +
+        'If you did not paste all three, the model may have filtered on the wrong values. ' +
+        'Try: “Show journal entries for company ABCD, fiscal year 2025, accounting document 9400000205.” ' +
+        'Or ask for “the 50 most recent journal entries” without a document filter.'
+      );
+    }
+    return (
+      'No rows matched. Check that **company_code**, **fiscal_year**, and **accounting_document** exactly match your database (including leading zeros and case). ' +
+      'If you are sure they are correct, that document may not be in the `journal_entries` extract.'
+    );
   }
 
-  const cappedResults = results.slice(0, 30);
+  if (/billed|billing|invoice/i.test(m) && /no\s+(matching\s+)?delivery|without\s+delivery|no\s+delivery/i.test(m)) {
+    return (
+      'No rows matched. In this dataset, **billing lines reference outbound delivery documents**, and deliveries link to **sales orders** via `delivery_items`. ' +
+      'There is no path where a sales order is invoiced on that chain **without** a delivery line, so an empty result is expected for “billed but no delivery” in the strict sense. ' +
+      'If you meant **billing lines that point at a missing delivery document**, ask for “billing items with invalid delivery reference” instead.'
+    );
+  }
+
+  return 'No matching data was found for your query. Try naming a concrete document or ID from your data, or rephrase.';
+}
+
+// ── Synthesize answer ──────────────────────────────────────────
+export async function synthesizeAnswer(message, results, options = {}) {
+  const rows = normalizeSqlQueryRows(results);
+
+  if (!rows.length) {
+    return explainEmptyQueryResult(message, options.sql);
+  }
+
+  const cappedResults = rows.slice(0, 30);
 
   return generateText({
     systemInstruction: `You are an analyst answering questions about a SAP Order-to-Cash dataset.
 Answer the user's question STRICTLY based on the provided query results.
 - Do NOT invent or assume data not present in the results.
 - If the results are empty, say so.
+- If the user asked for "billed without delivery" (or similar) but the rows clearly show sales orders linked to both delivery and billing, explain that in SAP O2C here billing goes through deliveries, so the strict "billed with no delivery" set is empty; the table shows orders that are on the normal billed-via-delivery path.
 - Use natural language. Be concise and clear.
 - ALWAYS format tabular data as markdown tables with proper headers.
 - For tables with many columns, select the most relevant 5-7 columns to display.

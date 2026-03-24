@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
-import { checkGuardrail, generateSQL, sanitizeSQL, synthesizeAnswer } from '@/lib/llm';
+import { checkGuardrail, generateSQL, normalizeSqlQueryRows, sanitizeSQL, synthesizeAnswer } from '@/lib/llm';
 
 export async function POST(request) {
   try {
@@ -50,7 +50,8 @@ export async function POST(request) {
     // Step 4: Execute against Neon
     let results;
     try {
-      results = await sql.query(cleanSQL);
+      const raw = await sql.query(cleanSQL);
+      results = normalizeSqlQueryRows(raw);
     } catch (err) {
       console.error('SQL execution error:', err.message, '\nSQL:', cleanSQL);
       return NextResponse.json({
@@ -62,7 +63,7 @@ export async function POST(request) {
     }
 
     // Step 5: Synthesize answer from results
-    const answer = await synthesizeAnswer(message, results);
+    const answer = await synthesizeAnswer(message, results, { sql: cleanSQL });
 
     return NextResponse.json({
       answer,

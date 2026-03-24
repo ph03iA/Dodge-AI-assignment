@@ -133,10 +133,21 @@ export async function GET(request) {
         data.productStorageLocations =
           await sql`SELECT * FROM product_storage_locations WHERE product = ANY(${mats}) LIMIT ${OVERVIEW_MAX_PRODUCT_STORAGE_LOCS}`;
       }
-      // Load journal entries linked to billing docs (sample first 50)
+      // Journal lines for loaded billings: tie via FI triple (matches graphBuilder / ingest), not only reference_document
       if (data.billingDocuments && data.billingDocuments.length > 0) {
-        const bdIds = data.billingDocuments.map(bd => bd.billing_document);
-        data.journalEntries = await sql`SELECT * FROM journal_entries WHERE reference_document = ANY(${bdIds}) LIMIT 50`;
+        const bdIds = data.billingDocuments.map((bd) => bd.billing_document);
+        data.journalEntries = await sql`
+          SELECT je.* FROM journal_entries je
+          WHERE EXISTS (
+            SELECT 1 FROM billing_documents bd
+            WHERE bd.billing_document = ANY(${bdIds})
+              AND bd.company_code IS NOT NULL AND bd.fiscal_year IS NOT NULL AND bd.accounting_document IS NOT NULL
+              AND bd.company_code = je.company_code
+              AND bd.fiscal_year = je.fiscal_year
+              AND bd.accounting_document = je.accounting_document
+          )
+          LIMIT 50
+        `;
       }
       // Load payments (sample first 50)
       data.payments = await sql`SELECT * FROM payments LIMIT 50`;
