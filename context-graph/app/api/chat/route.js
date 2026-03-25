@@ -1,22 +1,33 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
-import { checkGuardrail, generateSQL, normalizeSqlQueryRows, sanitizeSQL, synthesizeAnswer } from '@/lib/llm';
+import { extractGraphNodeIdsFromRows } from '@/lib/extractGraphNodeIds';
+import {
+  checkGuardrail,
+  generateSQL,
+  normalizeChatHistory,
+  normalizeSqlQueryRows,
+  sanitizeSQL,
+  synthesizeAnswer,
+} from '@/lib/llm';
 
 export async function POST(request) {
   try {
-    const { message } = await request.json();
+    const body = await request.json();
+    const { message, history: rawHistory } = body;
+    const history = normalizeChatHistory(rawHistory);
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
       return NextResponse.json({ error: 'Message is required.' }, { status: 400 });
     }
 
     // Step 1: Guardrail check
-    const isOnDomain = await checkGuardrail(message);
+    const isOnDomain = await checkGuardrail(message, { history });
     if (!isOnDomain) {
       return NextResponse.json({
         answer: 'This system is designed to answer questions related to the provided SAP Order-to-Cash dataset only. Please ask a question about sales orders, deliveries, billing documents, payments, customers, or products.',
         sql: null,
         results: null,
+        highlightNodeIds: [],
         blocked: true,
       });
     }
@@ -24,12 +35,13 @@ export async function POST(request) {
     // Step 2: Generate SQL
     let rawSQL;
     try {
-      rawSQL = await generateSQL(message);
+      rawSQL = await generateSQL(message, { history });
     } catch (err) {
       return NextResponse.json({
         answer: 'I was unable to generate a query for your question. Please try rephrasing it.',
         sql: null,
         results: null,
+        highlightNodeIds: [],
         blocked: false,
       });
     }
@@ -43,6 +55,7 @@ export async function POST(request) {
         answer: `The generated query was rejected for safety: ${err.message}`,
         sql: rawSQL,
         results: null,
+        highlightNodeIds: [],
         blocked: false,
       });
     }
@@ -58,17 +71,22 @@ export async function POST(request) {
         answer: `There was an error running the query. The database returned: ${err.message}. Please try rephrasing your question.`,
         sql: cleanSQL,
         results: null,
+        highlightNodeIds: [],
         blocked: false,
       });
     }
 
+    const fullResults = results.slice(0, 50);
+    const highlightNodeIds = extractGraphNodeIdsFromRows(results);
+
     // Step 5: Synthesize answer from results
-    const answer = await synthesizeAnswer(message, results, { sql: cleanSQL });
+    const answer = await synthesizeAnswer(message, results, { sql: cleanSQL, history });
 
     return NextResponse.json({
       answer,
       sql: cleanSQL,
-      results: results.slice(0, 50),
+      results: fullResults,
+      highlightNodeIds,
       blocked: false,
     });
   } catch (error) {
@@ -77,6 +95,7 @@ export async function POST(request) {
       answer: 'An unexpected error occurred. Please try again.',
       sql: null,
       results: null,
+      highlightNodeIds: [],
       blocked: false,
     }, { status: 500 });
   }

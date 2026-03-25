@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, memo, useCallback } from 'react';
+import { useState, useRef, useEffect, memo, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 
 const AssistantMarkdown = dynamic(() => import('./AssistantMarkdown'), {
@@ -80,6 +80,10 @@ export default function ChatPanel({ onHighlightNodes }) {
     const userMsg = text || input.trim();
     if (!userMsg) return;
 
+    const historyPayload = messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role, content: m.content }));
+
     setInput('');
     setMessages(prev => [...prev, { id: newMsgId(), role: 'user', content: userMsg }]);
     setLoading(true);
@@ -88,7 +92,7 @@ export default function ChatPanel({ onHighlightNodes }) {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMsg }),
+        body: JSON.stringify({ message: userMsg, history: historyPayload }),
       });
 
       const data = await res.json();
@@ -102,11 +106,17 @@ export default function ChatPanel({ onHighlightNodes }) {
         blocked: data.blocked,
       }]);
 
-      if (data.results && onHighlightNodes) {
-        const ids = extractNodeIds(data.results);
-        onHighlightNodes(ids);
+      if (onHighlightNodes) {
+        if (data.blocked || !data.results?.length) {
+          onHighlightNodes([]);
+        } else {
+          const serverIds = Array.isArray(data.highlightNodeIds) ? data.highlightNodeIds : [];
+          const fallback = extractNodeIds(data.results);
+          onHighlightNodes([...new Set([...serverIds, ...fallback])]);
+        }
       }
     } catch {
+      if (onHighlightNodes) onHighlightNodes([]);
       setMessages(prev => [...prev, {
         id: newMsgId(),
         role: 'assistant',
@@ -116,7 +126,20 @@ export default function ChatPanel({ onHighlightNodes }) {
     } finally {
       setLoading(false);
     }
-  }, [input, onHighlightNodes]);
+  }, [input, messages, onHighlightNodes]);
+
+  const threadMessages = useMemo(
+    () => messages.filter((m) => m.role === 'user' || m.role === 'assistant'),
+    [messages]
+  );
+  const threadCount = threadMessages.length;
+  const turnPairs = Math.floor(threadCount / 2);
+
+  const clearThread = useCallback(() => {
+    setMessages([]);
+    setInput('');
+    if (onHighlightNodes) onHighlightNodes([]);
+  }, [onHighlightNodes]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -128,8 +151,35 @@ export default function ChatPanel({ onHighlightNodes }) {
   return (
     <div className="chat-panel">
       <div className="chat-header">
-        <h2>Query</h2>
-        <p className="chat-subtitle">Natural language over your ingested SAP O2C tables</p>
+        <div className="chat-header-row">
+          <h2>Query</h2>
+          {threadCount > 0 && (
+            <button
+              type="button"
+              className="chat-new-thread-btn"
+              onClick={clearThread}
+              disabled={loading}
+              title="Clear messages and start fresh (no prior context on next question)"
+            >
+              New conversation
+            </button>
+          )}
+        </div>
+        <p className="chat-subtitle">
+          Natural language over your ingested SAP O2C tables. Follow-up questions reuse this thread as
+          context for the model (same browser session; not stored on the server).
+        </p>
+        {threadCount > 0 && (
+          <div className="chat-memory-strip" role="status">
+            <span className="chat-memory-strip-title">Thread memory</span>
+            <span className="chat-memory-strip-detail">
+              {turnPairs > 0
+                ? `${turnPairs} Q&A pair${turnPairs === 1 ? '' : 's'} (${threadCount} messages) in context. `
+                : `${threadCount} message${threadCount === 1 ? '' : 's'} in context. `}
+              Your next send includes this transcript (trimmed on the server if very long).
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="chat-messages">
@@ -138,6 +188,10 @@ export default function ChatPanel({ onHighlightNodes }) {
             <p>
               Ask about billing lineage, product billing volume, or broken O2C flows (delivered-not-billed,
               billed-no-delivery)—or use a suggestion below.
+            </p>
+            <p className="chat-empty-memory-hint">
+              After the first answer, you can ask short follow-ups like &quot;Same for customer X&quot; or
+              &quot;Narrow to 2024&quot; — the assistant sees this thread, not just the latest line.
             </p>
           </div>
         )}
@@ -254,13 +308,25 @@ const SQLToggle = memo(function SQLToggle({ sql }) {
 function extractNodeIds(results) {
   const ids = new Set();
   for (const row of results) {
+    if (!row || typeof row !== 'object') continue;
     if (row.sales_order) ids.add(`sales_order:${row.sales_order}`);
     if (row.billing_document) ids.add(`billing:${row.billing_document}`);
     if (row.delivery_document) ids.add(`delivery:${row.delivery_document}`);
     if (row.business_partner) ids.add(`customer:${row.business_partner}`);
     if (row.customer) ids.add(`customer:${row.customer}`);
+    if (row.sold_to_party) ids.add(`customer:${row.sold_to_party}`);
     if (row.product) ids.add(`product:${row.product}`);
     if (row.material) ids.add(`product:${row.material}`);
+    if (row.plant) ids.add(`plant:${row.plant}`);
+    const cc = row.company_code;
+    const fy = row.fiscal_year;
+    const ad = row.accounting_document;
+    const item = row.accounting_document_item;
+    if (cc != null && fy != null && ad != null && item != null) {
+      ids.add(`journal_entry:${cc}:${fy}:${ad}:${item}`);
+    }
+    const dd = row.delivery_doc ?? row.delivery_doc_id;
+    if (dd) ids.add(`delivery:${dd}`);
   }
   return Array.from(ids);
 }

@@ -179,6 +179,22 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
 
   // Highlight set for O(1) lookup
   const highlightSet = useMemo(() => new Set(highlightIds), [highlightIds]);
+  const highlightActive = highlightSet.size > 0;
+
+  // Frame highlighted nodes after query results (only if they exist in the current graph)
+  useEffect(() => {
+    if (!highlightActive || !fgRef.current) return;
+    const inGraph = graphData.nodes.some((n) => highlightSet.has(n.id));
+    if (!inGraph) return;
+    const t = window.setTimeout(() => {
+      try {
+        fgRef.current.zoomToFit(450, 72, (n) => highlightSet.has(n.id));
+      } catch {
+        /* ignore */
+      }
+    }, 100);
+    return () => window.clearTimeout(t);
+  }, [highlightIds, highlightActive, highlightSet, graphData.nodes]);
 
   const legendItems = useMemo(
     () => Object.entries(NODE_COLORS).map(([type, color]) => ({ type, color })),
@@ -196,11 +212,15 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
     expandNode(node.id);
   }, [expandNode]);
 
-  // Custom node rendering
+  // Custom node rendering — dim non-highlighted nodes when chat sent a highlight set
   const nodeCanvasObject = useCallback((node, ctx, globalScale) => {
     const isHighlighted = highlightSet.has(node.id);
     const isSelected = selected?.id === node.id;
-    const size = isHighlighted || isSelected ? 4.5 : 3;
+    const dimmed = highlightActive && !isHighlighted && !isSelected;
+    const size = isHighlighted || isSelected ? 5.2 : 3;
+
+    const prevAlpha = ctx.globalAlpha;
+    if (dimmed) ctx.globalAlpha = 0.2;
 
     // Node circle
     ctx.beginPath();
@@ -208,29 +228,40 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
     ctx.fillStyle = node.color || '#9ca3af';
     ctx.fill();
 
-    // Highlight ring
+    ctx.globalAlpha = prevAlpha;
+
+    // Highlight ring (stronger when chat-highlighted)
     if (isHighlighted || isSelected) {
-      ctx.strokeStyle = isSelected ? '#0f172a' : '#b45309';
-      ctx.lineWidth = 1.35 / globalScale;
+      ctx.strokeStyle = isSelected ? '#0f172a' : '#c2410c';
+      ctx.lineWidth = (isHighlighted ? 2.1 : 1.35) / globalScale;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, size + 1.2 / globalScale, 0, 2 * Math.PI);
       ctx.stroke();
     }
 
     // Label (only when zoomed in enough)
     if (globalScale > 1.65) {
+      ctx.save();
+      if (dimmed) ctx.globalAlpha = 0.35;
       ctx.font = `${Math.max(2.5, 8 / globalScale)}px "Source Sans 3", ui-sans-serif, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
       ctx.fillStyle = '#334155';
       ctx.fillText(node.label, node.x, node.y + size + 2);
+      ctx.restore();
     }
-  }, [highlightSet, selected]);
+  }, [highlightActive, highlightSet, selected]);
 
   // Node size for collision/hit detection (must match visual size)
   const nodeVal = useCallback((node) => {
     const isHighlighted = highlightSet.has(node.id);
     const isSelected = selected?.id === node.id;
-    return isHighlighted || isSelected ? 4.5 : 3;
+    return isHighlighted || isSelected ? 5.2 : 3;
   }, [highlightSet, selected]);
+
+  const linkColor = useCallback(() => {
+    return highlightActive ? 'rgba(51, 65, 85, 0.09)' : 'rgba(51, 65, 85, 0.22)';
+  }, [highlightActive]);
 
   if (loading) {
     return (
@@ -280,10 +311,10 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
         width={dimensions.width}
         height={dimensions.height}
         graphData={graphData}
-        backgroundColor="oklch(0.94 0.02 230)"
+        backgroundColor="oklch(0.94 0.012 95)"
         nodeCanvasObject={nodeCanvasObject}
         nodeVal={nodeVal}
-        linkColor={() => 'rgba(51, 65, 85, 0.22)'}
+        linkColor={linkColor}
         linkDirectionalArrowLength={0}
         linkWidth={0.5}
         onNodeClick={handleNodeClick}

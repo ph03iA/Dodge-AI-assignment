@@ -241,8 +241,51 @@ async function generateText(args) {
   );
 }
 
+// ── Conversation memory (trimmed for token limits) ─────────────
+const MAX_HISTORY_MESSAGES = 10; // pairs of user/assistant
+const MAX_ASSISTANT_CHARS = 1400;
+const MAX_HISTORY_TOTAL_CHARS = 7000;
+
+/**
+ * @param {unknown} raw
+ * @returns {{ role: 'user'|'assistant', content: string }[]}
+ */
+export function normalizeChatHistory(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const out = [];
+  for (const m of raw) {
+    if (!m || typeof m !== 'object') continue;
+    const role = m.role;
+    if (role !== 'user' && role !== 'assistant') continue;
+    let content = typeof m.content === 'string' ? m.content.trim() : '';
+    if (!content) continue;
+    if (role === 'assistant' && content.length > MAX_ASSISTANT_CHARS) {
+      content = `${content.slice(0, MAX_ASSISTANT_CHARS)}…`;
+    }
+    out.push({ role, content });
+  }
+  const tail = out.slice(-MAX_HISTORY_MESSAGES);
+  let total = 0;
+  const acc = [];
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const m = tail[i];
+    const piece = m.content.length + 24;
+    if (total + piece > MAX_HISTORY_TOTAL_CHARS) break;
+    acc.push(m);
+    total += piece;
+  }
+  return acc.reverse();
+}
+
+function formatHistoryBlock(history) {
+  if (!history?.length) return '';
+  return history
+    .map((m) => (m.role === 'user' ? 'User' : 'Assistant') + ': ' + m.content)
+    .join('\n\n');
+}
+
 // ── Guardrail check ────────────────────────────────────────────
-export async function checkGuardrail(message) {
+export async function checkGuardrail(message, options = {}) {
   const offTopicPatterns = [
     /capital\s+of/i, /president\s+of/i, /weather\s+in/i,
     /recipe\s+for/i, /how\s+to\s+cook/i, /translate\s+/i,
@@ -266,6 +309,11 @@ export async function checkGuardrail(message) {
     return false;
   }
 
+  const hist = formatHistoryBlock(normalizeChatHistory(options.history));
+  const userContent = hist
+    ? `Prior conversation (oldest first):\n${hist}\n\nLatest user message to classify:\n${message}`
+    : message;
+
   const answer = await generateText({
     systemInstruction: `You are a guardrail classifier for a SAP Order-to-Cash dataset query system.
 The system contains data about: sales orders, order items, outbound deliveries, billing documents, journal entries, payments, customers/business partners, products, plants, and addresses.
@@ -274,11 +322,12 @@ Determine if the user's question is a legitimate, on-domain question about this 
 
 Rules:
 - Questions about sales, orders, billing, deliveries, payments, customers, products, materials, journal entries, accounting documents, plants, or any business process in the Order-to-Cash flow are ON-DOMAIN.
+- Short follow-ups that clearly continue an O2C topic (e.g. "same for customer X", "narrow to last year", "show SQL again") are ON-DOMAIN when prior turns were about this dataset.
 - Questions about general knowledge, trivia, creative writing, coding help, personal advice, or anything unrelated to this specific dataset are OFF-DOMAIN.
 - Questions that merely mention business terms but ask for creative content (e.g. "write a story about billing") are OFF-DOMAIN.
 
 Respond with ONLY the word YES (on-domain) or NO (off-domain). Nothing else.`,
-    userContent: message,
+    userContent,
     temperature: 0,
     maxOutputTokens: 5,
   });
@@ -287,7 +336,12 @@ Respond with ONLY the word YES (on-domain) or NO (off-domain). Nothing else.`,
 }
 
 // ── Generate SQL ───────────────────────────────────────────────
-export async function generateSQL(message) {
+export async function generateSQL(message, options = {}) {
+  const hist = formatHistoryBlock(normalizeChatHistory(options.history));
+  const userContent = hist
+    ? `Conversation so far (oldest first). Use it to resolve pronouns and follow-ups; generate SQL for the CURRENT question only.\n\n${hist}\n\n---\nCURRENT QUESTION (produce one SELECT for this):\n${message}`
+    : message;
+
   return generateText({
     systemInstruction: `You are a SQL query generator for a PostgreSQL database containing SAP Order-to-Cash data.
 
@@ -357,7 +411,7 @@ LEFT JOIN deliveries d ON d.delivery_document = di.delivery_document
 LEFT JOIN journal_entries je ON je.company_code = bd.company_code AND je.fiscal_year = bd.fiscal_year AND je.accounting_document = bd.accounting_document
 WHERE bd.billing_document = '90504248'
 LIMIT 100`,
-    userContent: message,
+    userContent,
     temperature: 0,
     maxOutputTokens: 1024,
   });
@@ -452,6 +506,10 @@ export async function synthesizeAnswer(message, results, options = {}) {
   }
 
   const cappedResults = rows.slice(0, 30);
+  const hist = formatHistoryBlock(normalizeChatHistory(options.history));
+  const questionBlock = hist
+    ? `Prior conversation (for context only; do not invent facts from it):\n${hist}\n\nCurrent user question: ${message}`
+    : `User question: ${message}`;
 
   return generateText({
     systemInstruction: `You are an analyst answering questions about a SAP Order-to-Cash dataset.
@@ -473,7 +531,7 @@ Answer the user's question STRICTLY based on the provided query results.
 - For date fields, format them in a human-readable way.
 - Add a "Key Insights" section after the table if there are meaningful patterns.
 - Keep your answer under 800 words.`,
-    userContent: `User question: ${message}\n\nQuery results (JSON):\n${JSON.stringify(cappedResults, null, 2)}`,
+    userContent: `${questionBlock}\n\nQuery results (JSON):\n${JSON.stringify(cappedResults, null, 2)}`,
     temperature: 0.2,
     maxOutputTokens: 2048,
   });
