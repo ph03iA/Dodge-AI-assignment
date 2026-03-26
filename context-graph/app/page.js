@@ -132,6 +132,10 @@ export default function Home() {
     if (isNarrow && ids.length) setMobileTabWithTransition(() => setMobileTab('graph'));
   }, [isNarrow]);
 
+  const onClearHighlights = useCallback(() => {
+    setHighlightIds([]);
+  }, []);
+
   return (
     <div className="app-layout">
       <header className="app-header">
@@ -193,6 +197,7 @@ export default function Home() {
           >
             <GraphView
               highlightIds={highlightIds}
+              onClearHighlights={onClearHighlights}
               simulationActive={graphSimulationActive}
               onNodeSelect={() => {}}
             />

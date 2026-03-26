@@ -55,7 +55,12 @@ const TYPE_LABELS = {
   storage_location: 'Storage loc.',
 };
 
-export default function GraphView({ highlightIds = [], onNodeSelect, simulationActive = true }) {
+export default function GraphView({
+  highlightIds = [],
+  onClearHighlights,
+  onNodeSelect,
+  simulationActive = true,
+}) {
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [setupHint, setSetupHint] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -263,6 +268,19 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
     return highlightActive ? 'rgba(51, 65, 85, 0.09)' : 'rgba(51, 65, 85, 0.22)';
   }, [highlightActive]);
 
+  const handleClearHighlights = useCallback(() => {
+    if (onClearHighlights) onClearHighlights();
+    window.setTimeout(() => {
+      try {
+        const fg = fgRef.current;
+        if (!fg?.zoomToFit) return;
+        fg.zoomToFit(500, 80);
+      } catch {
+        /* ignore */
+      }
+    }, 0);
+  }, [onClearHighlights]);
+
   if (loading) {
     return (
       <div ref={containerRef} className="graph-container">
@@ -304,6 +322,22 @@ export default function GraphView({ highlightIds = [], onNodeSelect, simulationA
           {graphData.nodes.length} nodes &middot; {graphData.links.length} edges
         </div>
       </div>
+
+      {highlightActive && onClearHighlights && (
+        <div className="graph-highlight-toolbar">
+          <span className="graph-highlight-toolbar-label" aria-hidden>
+            {highlightIds.length} from query
+          </span>
+          <button
+            type="button"
+            className="graph-clear-highlights-btn"
+            onClick={handleClearHighlights}
+            title="Remove orange rings and dimming; zoom out to the full graph"
+          >
+            Clear highlights
+          </button>
+        </div>
+      )}
 
       {/* Force Graph */}
       <ForceGraph2D
